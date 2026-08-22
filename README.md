@@ -271,11 +271,13 @@ service entry to the new bar entry.
 ## Use
 
 Click the Oma2FA bar icon or press `Super+Alt+V`. The badge is only a count of
-available codes; the bar never displays a code or message content. The newest
-code is selected first.
+available codes; the bar never displays a code or message content. Search is
+active when the picker opens, while the newest matching code remains the
+default Enter action.
 
 - Type to filter by service, source, or code.
-- Use Up/Down, Page Up/Page Down, Home, or End to browse.
+- Press Down to enter the results at the newest code, or Up to enter at the
+  oldest; then use Up/Down, Page Up/Page Down, Home, or End to browse.
 - Press Enter to copy and request a paste into the window that was focused
   before the picker opened.
 - Press Shift+Enter to copy only.

@@ -212,7 +212,120 @@ ShellRoot {
     harness.validateWideLayout()
     harness.validateMinimumLayout()
 
+    // Keep the picker logically in its opening phase while exercising the
+    // shared key handler. This populates and filters the display model without
+    // ever making the layer-shell PanelWindow visible.
+    harness.picker.openingPending = true
+    harness.picker.rebuildDisplay(false)
+    Qt.callLater(harness.validateSearchAndListNavigation)
+  }
+
+  function pickerKey(key, text) {
+    var event = {
+      key: key,
+      modifiers: Qt.NoModifier,
+      text: text || "",
+      accepted: false
+    }
+    harness.picker.handlePickerKey(event, true)
+    harness.expect(event.accepted === true,
+      "picker did not accept key " + String(key))
+  }
+
+  function expectSearchMode(label) {
+    harness.expect(harness.picker.cursorActive === false,
+      label + " should leave the result cursor inactive")
+    // `searchModeActive` is also the predicate used by the caret bindings.
+    // The actual caret remains hidden because this harness intentionally does
+    // not show or focus the layer-shell window.
+    harness.expect(harness.picker.searchModeActive === true,
+      label + " should return the search caret mode")
+  }
+
+  function expectListMode(label) {
+    harness.expect(harness.picker.cursorActive === true,
+      label + " should activate the result cursor")
+    harness.expect(harness.picker.searchModeActive === false,
+      label + " should hide the search caret mode")
+  }
+
+  function validateSearchAndListNavigation() {
+    harness.expectSearchMode("populated search")
+    harness.expect(harness.picker.selectedIndex === 0,
+      "search mode should retain the latest result as latent index zero")
+
+    harness.pickerKey(Qt.Key_Down, "")
+    harness.expectListMode("first Down from search")
+    harness.expect(harness.picker.selectedIndex === 0,
+      "first Down from search should select the latest result")
+
+    harness.pickerKey(Qt.Key_Down, "")
+    harness.expect(harness.picker.selectedIndex === 1,
+      "second Down should select the next result")
+
+    harness.pickerKey(Qt.Key_E, "e")
+    harness.expect(harness.picker.filterText === "e",
+      "typing from the list did not update the search filter")
+    harness.expectSearchMode("typing from the list")
+    harness.expect(harness.picker.selectedIndex === 0,
+      "typing should reset the latent result index")
+
+    harness.picker.setFilter("")
+    harness.expectSearchMode("clearing the filter")
+    harness.pickerKey(Qt.Key_Up, "")
+    harness.expectListMode("first Up from search")
+    harness.expect(harness.picker.selectedIndex === 1,
+      "first Up from search should select the last result")
+
+    harness.picker.setFilter("")
+    harness.expectSearchMode("filter reset before arrival")
+    fakeService.records = [
+      {
+        id: "newest-code",
+        code: "333333",
+        service: "Newest service",
+        source: "test",
+        received_ms: 3000,
+        expires_ms: 4000,
+        confidence: 0.9
+      },
+      fakeService.records[0],
+      fakeService.records[1]
+    ]
+    harness.expectSearchMode("record arrival while searching")
+    harness.expect(harness.picker.selectedIndex === 0,
+      "record arrival should leave the newest result as latent index zero")
+
+    harness.pickerKey(Qt.Key_Delete, "")
+    harness.expect(fakeService.deleteCalls === 0,
+      "Delete in search mode must not call the service")
+
+    harness.pickerKey(Qt.Key_Down, "")
+    harness.expectListMode("selection before a second arrival")
+    fakeService.records = [
+      {
+        id: "fourth-code",
+        code: "444444",
+        service: "Fourth service",
+        source: "test",
+        received_ms: 4000,
+        expires_ms: 5000,
+        confidence: 0.9
+      }
+    ].concat(fakeService.records)
+    harness.expectListMode("record arrival while navigating")
+    harness.expect(harness.picker.selectedIndex === 1,
+      "record arrival should preserve the visibly selected record")
+
+    harness.picker.setFilter("no-such-result")
+    harness.expectSearchMode("empty filtered results")
+    harness.pickerKey(Qt.Key_Down, "")
+    harness.expectSearchMode("Down with no results")
+    harness.expect(harness.picker.selectedIndex === 0,
+      "Down with no results should retain latent index zero")
+
     console.log("OMA2FA_PICKER_SHORTCUTS_PASS")
+    harness.picker.close()
     harness.picker.destroy()
     Qt.exit(0)
   }
@@ -223,10 +336,31 @@ ShellRoot {
     property bool bridgeAlive: true
     property bool ready: true
     property string lastError: ""
-    property var records: []
+    property int deleteCalls: 0
+    property var records: [
+      {
+        id: "newer-code",
+        code: "222222",
+        service: "Newer service",
+        source: "test",
+        received_ms: 2000,
+        expires_ms: 3000,
+        confidence: 0.9
+      },
+      {
+        id: "older-code",
+        code: "111111",
+        service: "Older service",
+        source: "test",
+        received_ms: 1000,
+        expires_ms: 3000,
+        confidence: 0.9
+      }
+    ]
     property var status: ({ ready: true, sources: {} })
 
     function refresh() { return 0 }
+    function deleteRecord(_recordId) { deleteCalls++ }
   }
 
   Item {

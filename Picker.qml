@@ -18,7 +18,8 @@ Item {
   property bool openingPending: false
   property string filterText: ""
   property int selectedIndex: 0
-  property bool cursorActive: true
+  property bool cursorActive: false
+  readonly property bool searchModeActive: !root.cursorActive
   property var capturedTarget: ({})
   property int clockRevision: 0
   property bool transportDetailsPinned: false
@@ -97,7 +98,7 @@ Item {
     var payload = root.parseJson(payloadJson, {})
     root.filterText = ""
     root.selectedIndex = 0
-    root.cursorActive = true
+    root.cursorActive = false
     root.transportDetailsPinned = false
     root.capturedTarget = root.sanitizeTarget(payload.target)
     root.disarmPointer()
@@ -124,7 +125,7 @@ Item {
     if (root.openingPending) root.openingPending = false
     root.opened = true
     root.selectedIndex = 0
-    root.cursorActive = displayModel.count > 0
+    root.cursorActive = false
     root.rebuildDisplay(false)
     root.disarmPointer()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
@@ -362,8 +363,9 @@ Item {
       return
     }
 
+    var keepCursor = keepSelection === true && root.cursorActive
     var selectedId = ""
-    if (keepSelection === true && displayModel.count > 0
+    if (keepCursor && displayModel.count > 0
         && root.selectedIndex >= 0 && root.selectedIndex < displayModel.count)
       selectedId = String(displayModel.get(root.selectedIndex).recordId)
 
@@ -412,7 +414,7 @@ Item {
       root.cursorActive = false
     } else {
       root.selectedIndex = nextSelected >= 0 ? nextSelected : 0
-      root.cursorActive = true
+      root.cursorActive = keepCursor
       Qt.callLater(function() {
         resultList.positionViewAtIndex(root.selectedIndex, ListView.Contain)
       })
@@ -422,7 +424,7 @@ Item {
   function setFilter(nextFilter) {
     root.filterText = String(nextFilter || "")
     root.selectedIndex = 0
-    root.cursorActive = true
+    root.cursorActive = false
     root.disarmPointer()
     root.rebuildDisplay(false)
   }
@@ -430,8 +432,13 @@ Item {
   function select(delta) {
     if (displayModel.count === 0) return
     root.disarmPointer()
-    root.cursorActive = true
-    root.selectedIndex = (root.selectedIndex + delta + displayModel.count) % displayModel.count
+    if (!root.cursorActive) {
+      root.cursorActive = true
+      root.selectedIndex = delta < 0 ? displayModel.count - 1 : 0
+    } else {
+      root.selectedIndex = (root.selectedIndex + delta + displayModel.count)
+        % displayModel.count
+    }
     resultList.positionViewAtIndex(root.selectedIndex, ListView.Contain)
   }
 
@@ -487,7 +494,7 @@ Item {
       root.setFilter(Util.editedFilter(event, root.filterText))
       event.accepted = true
     } else if (event.key === Qt.Key_Delete) {
-      root.deleteIndex(root.selectedIndex)
+      if (root.cursorActive) root.deleteIndex(root.selectedIndex)
       event.accepted = true
     } else if (event.key === Qt.Key_Up) {
       root.select(-1)
@@ -979,7 +986,7 @@ Item {
             anchors.bottom: searchText.bottom
             color: root.foreground
             opacity: searchCaretBlink.illuminated ? 0.86 : 0
-            visible: root.opened && keyCatcher.activeFocus
+            visible: root.opened && keyCatcher.activeFocus && root.searchModeActive
           }
 
           Timer {
@@ -988,7 +995,7 @@ Item {
             property bool illuminated: true
             interval: 530
             repeat: true
-            running: root.opened && keyCatcher.activeFocus
+            running: root.opened && keyCatcher.activeFocus && root.searchModeActive
             onTriggered: illuminated = !illuminated
             onRunningChanged: illuminated = true
           }
