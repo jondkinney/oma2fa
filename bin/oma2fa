@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+resolve_script_dir() {
+  local source_path="${BASH_SOURCE[0]}"
+  local source_dir link_target
+
+  while [[ -L "$source_path" ]]; do
+    source_dir=$(cd -P -- "$(dirname -- "$source_path")" && pwd)
+    link_target=$(readlink -- "$source_path")
+    if [[ "$link_target" == /* ]]; then
+      source_path="$link_target"
+    else
+      source_path="$source_dir/$link_target"
+    fi
+  done
+
+  cd -P -- "$(dirname -- "$source_path")" && pwd
+}
+
+script_dir=$(resolve_script_dir)
+repo_root=$(cd -P -- "$script_dir/.." && pwd)
+python_bin="${OMA2FA_PYTHON:-python3}"
+
+if [[ ! -f "$repo_root/oma2fa/cli.py" ]]; then
+  echo "oma2fa: Python package not found beside this launcher: $repo_root" >&2
+  exit 1
+fi
+
+if ! command -v -- "$python_bin" >/dev/null 2>&1; then
+  echo "oma2fa: Python interpreter not found: $python_bin" >&2
+  exit 127
+fi
+
+export PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}"
+exec "$python_bin" -m oma2fa.cli "$@"
