@@ -194,6 +194,9 @@ that store whenever it opens. The standalone listener also publishes a minimal
 owner-only heartbeat so the picker can report it as an active transport. That
 heartbeat contains only a format version, timestamp, and random process-instance
 identifier; it contains no bind address, token, sender, message body, or code.
+Hover the transport count in the picker to preview each transport's derived
+health, or click it to keep the details open. Arbitrary backend detail is never
+rendered in that disclosure.
 
 ## Requirements
 

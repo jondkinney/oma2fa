@@ -21,6 +21,7 @@ Item {
   property bool cursorActive: true
   property var capturedTarget: ({})
   property int clockRevision: 0
+  property bool transportDetailsPinned: false
 
   property color background: Color.menu.background
   property color foreground: Color.menu.text
@@ -97,6 +98,7 @@ Item {
     root.filterText = ""
     root.selectedIndex = 0
     root.cursorActive = true
+    root.transportDetailsPinned = false
     root.capturedTarget = root.sanitizeTarget(payload.target)
     root.disarmPointer()
 
@@ -135,6 +137,7 @@ Item {
     root.capturedTarget = ({})
     root.selectedIndex = 0
     root.cursorActive = false
+    root.transportDetailsPinned = false
     displayModel.clear()
     targetCapture.output = ""
     if (targetCapture.running)
@@ -172,26 +175,116 @@ Item {
     return source.running === true
   }
 
-  function activeTransportCount(statusValue) {
-    if (!statusValue || !statusValue.sources) return 0
+  function transportDisplayName(name) {
+    var sourceName = String(name || "").toLowerCase()
+    if (sourceName === "blueferry") return "BlueFerry"
+    if (sourceName === "webhook") return "Phone webhook"
+    if (sourceName === "kdeconnect") return "KDE Connect"
+
+    var words = sourceName.replace(/[_-]+/g, " ").trim().split(/\s+/)
+    var display = []
+    for (var index = 0; index < words.length; index++) {
+      if (!words[index]) continue
+      display.push(words[index].charAt(0).toUpperCase() + words[index].substring(1))
+    }
+    return display.join(" ").substring(0, 32) || "Other transport"
+  }
+
+  function transportHealthLabel(source) {
+    if (!source || typeof source !== "object" || source.available === false)
+      return "Unavailable"
+    if (source.enabled === false) return "Disabled"
+    if (root.sourceIsActiveTransport("transport", source))
+      return source.connected === true ? "Connected" : "Ready"
+
+    var detail = String(source.detail || "").toLowerCase()
+    if (detail === "not responding") return "Not responding"
+    if (detail === "starting") return "Starting"
+    if (detail === "checking receive events") return "Checking messages"
+    if (detail === "receive events unavailable") return "SMS unavailable"
+    if (detail === "reconnecting") return "Reconnecting"
+    if (detail === "authorization-required") return "Authorization needed"
+    if (detail === "map-connection-refused") return "Messages unavailable"
+    if (detail === "status unavailable") return "Status unavailable"
+    if (detail === "history unavailable" || detail === "degraded") return "Degraded"
+    if (detail === "could not start" || detail === "message processing failed")
+      return "Error"
+    if (source.running === true && source.connected === false) return "Disconnected"
+    if (source.enabled === true) return "Not running"
+    return "Inactive"
+  }
+
+  function transportHealthTone(entry) {
+    if (entry && entry.active === true) return "active"
+    var health = entry ? String(entry.health || "") : ""
+    if (health === "Not responding" || health === "SMS unavailable"
+        || health === "Messages unavailable" || health === "Status unavailable"
+        || health === "Error" || health === "Degraded") return "error"
+    if (health === "Starting" || health === "Checking messages"
+        || health === "Reconnecting" || health === "Authorization needed")
+      return "pending"
+    return "inactive"
+  }
+
+  function transportEntries(statusValue) {
+    if (!statusValue || !statusValue.sources) return []
     var sources = statusValue.sources
-    var count = 0
+    var entries = []
+
+    function appendEntry(name, source) {
+      var sourceName = String(name || "").toLowerCase()
+      if (!sourceName || sourceName === "manual" || !source
+          || typeof source !== "object") return
+      entries.push({
+        id: sourceName,
+        name: root.transportDisplayName(sourceName),
+        active: root.sourceIsActiveTransport(sourceName, source),
+        health: root.transportHealthLabel(source)
+      })
+    }
+
     if (Array.isArray(sources)) {
       for (var index = 0; index < sources.length; index++) {
         var source = sources[index]
-        var name = source && typeof source === "object"
+        var sourceName = source && typeof source === "object"
           ? (source.name || source.id || "") : ""
-        if (root.sourceIsActiveTransport(name, source)) count++
+        appendEntry(sourceName, source)
       }
-      return count
+    } else if (typeof sources === "object") {
+      var names = Object.keys(sources)
+      for (var keyIndex = 0; keyIndex < names.length; keyIndex++)
+        appendEntry(names[keyIndex], sources[names[keyIndex]])
     }
-    if (typeof sources !== "object") return 0
-    var names = Object.keys(sources)
-    for (var keyIndex = 0; keyIndex < names.length; keyIndex++) {
-      var sourceName = names[keyIndex]
-      if (root.sourceIsActiveTransport(sourceName, sources[sourceName])) count++
+
+    var order = { blueferry: 0, webhook: 1, kdeconnect: 2 }
+    entries.sort(function(left, right) {
+      if (left.active !== right.active) return left.active ? -1 : 1
+      var leftOrder = order[left.id] !== undefined ? order[left.id] : 100
+      var rightOrder = order[right.id] !== undefined ? order[right.id] : 100
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder
+      return left.name.localeCompare(right.name)
+    })
+    return entries
+  }
+
+  function activeTransportCount(statusValue) {
+    var entries = root.transportEntries(statusValue)
+    var count = 0
+    for (var index = 0; index < entries.length; index++) {
+      if (entries[index].active) count++
     }
     return count
+  }
+
+  function activeTransportSummary(statusValue) {
+    var entries = root.transportEntries(statusValue)
+    var names = []
+    for (var index = 0; index < entries.length; index++) {
+      if (entries[index].active) names.push(entries[index].name)
+    }
+    if (names.length === 0) return "Active transports: none"
+    return (names.length === 1 ? "Active transport: " : "Active transports: ")
+      + names.join(", ")
   }
 
   function statusText() {
@@ -379,6 +472,53 @@ Item {
     // rebuilds the list and clamps the cursor.
   }
 
+  function handlePickerKey(event, allowTransportFocus) {
+    if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+      if (allowTransportFocus)
+        transportStatusTrigger.forceActiveFocus()
+      else
+        keyCatcher.forceActiveFocus()
+      event.accepted = true
+    } else if (event.key === Qt.Key_Escape) {
+      // Escape always closes and never asks the service to activate.
+      root.dismiss()
+      event.accepted = true
+    } else if (Util.editsFilter(event, root.filterText)) {
+      root.setFilter(Util.editedFilter(event, root.filterText))
+      event.accepted = true
+    } else if (event.key === Qt.Key_Delete) {
+      root.deleteIndex(root.selectedIndex)
+      event.accepted = true
+    } else if (event.key === Qt.Key_Up) {
+      root.select(-1)
+      event.accepted = true
+    } else if (event.key === Qt.Key_Down) {
+      root.select(1)
+      event.accepted = true
+    } else if (event.key === Qt.Key_PageUp) {
+      root.select(-6)
+      event.accepted = true
+    } else if (event.key === Qt.Key_PageDown) {
+      root.select(6)
+      event.accepted = true
+    } else if (event.key === Qt.Key_Home) {
+      root.selectAbsolute(0)
+      event.accepted = true
+    } else if (event.key === Qt.Key_End) {
+      root.selectAbsolute(displayModel.count - 1)
+      event.accepted = true
+    } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+      root.activateIndex(root.selectedIndex,
+        !(event.modifiers & Qt.ShiftModifier))
+      event.accepted = true
+    } else if (event.text && event.text.length === 1
+        && event.text.charCodeAt(0) >= 32
+        && event.text.charCodeAt(0) !== 127) {
+      root.setFilter(root.filterText + event.text)
+      event.accepted = true
+    }
+  }
+
   onServiceChanged: root.rebuildDisplay(false)
 
   Connections {
@@ -508,59 +648,35 @@ Item {
       borderSpec: root.borderSpec
       padding: root.contentMargin
 
-      MouseArea { anchors.fill: parent; onClicked: {} }
+      MouseArea {
+        anchors.fill: parent
+        onClicked: root.transportDetailsPinned = false
+      }
 
       Item {
         id: keyCatcher
         objectName: "pickerKeyCatcher"
         anchors.fill: parent
         focus: true
+        activeFocusOnTab: true
         z: 5
 
+        KeyNavigation.tab: transportStatusTrigger
+        KeyNavigation.backtab: transportStatusTrigger
         Keys.priority: Keys.BeforeItem
-        Keys.onPressed: function(event) {
-          if (event.key === Qt.Key_Escape) {
-            // Escape always closes and never asks the service to activate.
-            root.dismiss()
-            event.accepted = true
-          } else if (Util.editsFilter(event, root.filterText)) {
-            root.setFilter(Util.editedFilter(event, root.filterText))
-            event.accepted = true
-          } else if (event.key === Qt.Key_Delete) {
-            root.deleteIndex(root.selectedIndex)
-            event.accepted = true
-          } else if (event.key === Qt.Key_Up) {
-            root.select(-1)
-            event.accepted = true
-          } else if (event.key === Qt.Key_Down) {
-            root.select(1)
-            event.accepted = true
-          } else if (event.key === Qt.Key_PageUp) {
-            root.select(-6)
-            event.accepted = true
-          } else if (event.key === Qt.Key_PageDown) {
-            root.select(6)
-            event.accepted = true
-          } else if (event.key === Qt.Key_Home) {
-            root.selectAbsolute(0)
-            event.accepted = true
-          } else if (event.key === Qt.Key_End) {
-            root.selectAbsolute(displayModel.count - 1)
-            event.accepted = true
-          } else if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
-            root.activateIndex(root.selectedIndex,
-              !(event.modifiers & Qt.ShiftModifier))
-            event.accepted = true
-          } else if (event.text && event.text.length === 1
-              && event.text.charCodeAt(0) >= 32
-              && event.text.charCodeAt(0) !== 127) {
-            root.setFilter(root.filterText + event.text)
-            event.accepted = true
-          }
+        Keys.onPressed: function(event) { root.handlePickerKey(event, true) }
+        Keys.onTabPressed: function(event) {
+          transportStatusTrigger.forceActiveFocus()
+          event.accepted = true
+        }
+        Keys.onBacktabPressed: function(event) {
+          transportStatusTrigger.forceActiveFocus()
+          event.accepted = true
         }
       }
 
       Column {
+        z: 6
         anchors.fill: parent
         anchors.topMargin: card.contentTopInset
         anchors.rightMargin: card.contentRightInset
@@ -569,10 +685,14 @@ Item {
         spacing: root.contentSpacing
 
         Item {
+          id: titleBar
           width: parent.width
           height: root.titleHeight
+          z: 10
 
           Text {
+            id: titleLabel
+            objectName: "pickerTitleLabel"
             anchors.left: parent.left
             anchors.verticalCenter: parent.verticalCenter
             text: "Oma2FA"
@@ -583,29 +703,238 @@ Item {
             font.weight: Font.DemiBold
           }
 
-          Row {
+          Item {
+            id: transportStatusTrigger
+            objectName: "transportStatusTrigger"
             anchors.right: parent.right
-            anchors.verticalCenter: parent.verticalCenter
-            spacing: Style.spacing.sm
+            anchors.top: parent.top
+            width: Math.max(0, Math.min(
+              parent.width - titleLabel.implicitWidth - Style.spacing.lg,
+              Math.max(Style.space(140), transportStatusDot.width
+                + Math.min(Style.space(360), transportStatusText.implicitWidth)
+                + transportStatusChevron.implicitWidth + Style.spacing.sm * 4)))
+            height: parent.height
+            activeFocusOnTab: true
+            KeyNavigation.tab: keyCatcher
+            KeyNavigation.backtab: keyCatcher
 
-            Rectangle {
-              width: Style.space(7)
-              height: width
-              radius: width / 2
-              anchors.verticalCenter: parent.verticalCenter
-              color: root.statusColor()
-              opacity: root.service && root.service.bridgeAlive === true ? 0.9 : 0.55
+            Accessible.role: Accessible.Button
+            Accessible.focusable: true
+            Accessible.focused: transportStatusTrigger.activeFocus
+            Accessible.name: root.activeTransportSummary(
+              root.service ? root.service.status : null)
+            Accessible.description: root.transportDetailsPinned
+              ? "Transport details shown. Press to hide."
+              : "Transport details hidden. Press to show."
+            Accessible.onPressAction: root.transportDetailsPinned = !root.transportDetailsPinned
+
+            Keys.priority: Keys.BeforeItem
+            Keys.onPressed: function(event) {
+              if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+                  || event.key === Qt.Key_Space) {
+                root.transportDetailsPinned = !root.transportDetailsPinned
+                event.accepted = true
+              } else {
+                keyCatcher.forceActiveFocus()
+                root.handlePickerKey(event, false)
+              }
+            }
+            Keys.onTabPressed: function(event) {
+              keyCatcher.forceActiveFocus()
+              event.accepted = true
+            }
+            Keys.onBacktabPressed: function(event) {
+              keyCatcher.forceActiveFocus()
+              event.accepted = true
             }
 
-            Text {
-              width: Math.min(Style.space(360), implicitWidth)
-              text: root.statusText()
-              textFormat: Text.PlainText
-              color: root.foreground
-              opacity: 0.62
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              elide: Text.ElideLeft
+            Rectangle {
+              anchors.fill: parent
+              anchors.topMargin: Style.spacing.xs
+              anchors.bottomMargin: Style.spacing.xs
+              radius: Math.min(root.cornerRadius, Style.space(6))
+              color: Util.alpha(root.foreground,
+                transportStatusMouse.containsMouse || root.transportDetailsPinned
+                  || transportStatusTrigger.activeFocus ? 0.055 : 0)
+              border.width: root.transportDetailsPinned
+                || transportStatusTrigger.activeFocus ? Style.normalBorderWidth : 0
+              border.color: Util.alpha(root.foreground, 0.18)
+            }
+
+            Row {
+              id: transportStatusSummary
+              anchors.left: parent.left
+              anchors.leftMargin: Style.spacing.sm
+              anchors.right: parent.right
+              anchors.rightMargin: Style.spacing.sm
+              anchors.verticalCenter: parent.verticalCenter
+              spacing: Style.spacing.sm
+
+              Rectangle {
+                id: transportStatusDot
+                width: Style.space(7)
+                height: width
+                radius: width / 2
+                anchors.verticalCenter: parent.verticalCenter
+                color: root.statusColor()
+                opacity: root.service && root.service.bridgeAlive === true ? 0.9 : 0.55
+              }
+
+              Text {
+                id: transportStatusText
+                objectName: "transportStatusText"
+                width: Math.max(0, transportStatusSummary.width
+                  - transportStatusDot.width - transportStatusChevron.width
+                  - Style.spacing.sm * 2)
+                text: root.statusText()
+                textFormat: Text.PlainText
+                color: root.foreground
+                opacity: 0.62
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+                elide: Text.ElideLeft
+              }
+
+              Text {
+                id: transportStatusChevron
+                objectName: "transportStatusChevron"
+                anchors.verticalCenter: parent.verticalCenter
+                text: root.transportDetailsPinned ? "▴" : "▾"
+                textFormat: Text.PlainText
+                color: root.foreground
+                opacity: 0.42
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.caption
+              }
+            }
+
+            MouseArea {
+              id: transportStatusMouse
+              anchors.fill: parent
+              hoverEnabled: true
+              cursorShape: Qt.PointingHandCursor
+              onClicked: function(mouse) {
+                root.transportDetailsPinned = !root.transportDetailsPinned
+                mouse.accepted = true
+              }
+            }
+
+            Rectangle {
+              id: transportStatusPopover
+              objectName: "transportStatusPopover"
+              anchors.top: parent.bottom
+              anchors.right: parent.right
+              width: Math.min(Style.space(280), titleBar.width)
+              height: transportDetailsColumn.implicitHeight + Style.spacing.md * 2
+              visible: root.transportDetailsPinned || transportStatusMouse.containsMouse
+                || transportPopoverMouse.containsMouse
+              color: root.background
+              border.width: Style.normalBorderWidth
+              border.color: Util.alpha(root.foreground, 0.20)
+              radius: root.cornerRadius
+              z: 20
+
+              MouseArea {
+                id: transportPopoverMouse
+                anchors.fill: parent
+                hoverEnabled: true
+                cursorShape: Qt.ArrowCursor
+                onClicked: function(mouse) {
+                  root.transportDetailsPinned = true
+                  mouse.accepted = true
+                }
+              }
+
+              Column {
+                id: transportDetailsColumn
+                anchors.fill: parent
+                anchors.margins: Style.spacing.md
+                spacing: Style.spacing.sm
+
+                Text {
+                  width: parent.width
+                  text: "TRANSPORTS"
+                  textFormat: Text.PlainText
+                  color: root.foreground
+                  opacity: 0.44
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
+                  font.weight: Font.DemiBold
+                }
+
+                Text {
+                  width: parent.width
+                  visible: root.transportEntries(
+                    root.service ? root.service.status : null).length === 0
+                  text: "No configured transports"
+                  textFormat: Text.PlainText
+                  color: root.foreground
+                  opacity: 0.52
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                }
+
+                Repeater {
+                  model: root.transportEntries(root.service ? root.service.status : null)
+
+                  delegate: Item {
+                    id: transportRow
+                    required property var modelData
+
+                    objectName: "transportRow-" + String(modelData.id)
+                    width: transportDetailsColumn.width
+                    height: Math.max(Style.space(24), transportName.implicitHeight)
+                    opacity: modelData.active ? 1 : 0.68
+
+                    Rectangle {
+                      id: transportHealthDot
+                      width: Style.space(7)
+                      height: width
+                      radius: width / 2
+                      anchors.left: parent.left
+                      anchors.verticalCenter: parent.verticalCenter
+                      color: {
+                        var tone = root.transportHealthTone(transportRow.modelData)
+                        if (tone === "active") return Color.accent
+                        if (tone === "error") return Color.urgent
+                        return root.foreground
+                      }
+                      opacity: root.transportHealthTone(transportRow.modelData) === "inactive"
+                        ? 0.34 : 0.82
+                    }
+
+                    Text {
+                      id: transportName
+                      objectName: "transportName-" + String(transportRow.modelData.id)
+                      anchors.left: transportHealthDot.right
+                      anchors.leftMargin: Style.spacing.sm
+                      anchors.right: transportHealthLabel.left
+                      anchors.rightMargin: Style.spacing.md
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: String(transportRow.modelData.name)
+                      textFormat: Text.PlainText
+                      color: root.foreground
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.bodySmall
+                      font.weight: transportRow.modelData.active ? Font.DemiBold : Font.Normal
+                      elide: Text.ElideRight
+                    }
+
+                    Text {
+                      id: transportHealthLabel
+                      objectName: "transportHealth-" + String(transportRow.modelData.id)
+                      anchors.right: parent.right
+                      anchors.verticalCenter: parent.verticalCenter
+                      text: String(transportRow.modelData.health)
+                      textFormat: Text.PlainText
+                      color: root.foreground
+                      opacity: transportRow.modelData.active ? 0.72 : 0.52
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.caption
+                    }
+                  }
+                }
+              }
             }
           }
         }
