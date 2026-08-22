@@ -9,7 +9,7 @@ description = "A privacy-first 2FA code picker for Omarchy"
 readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
-authors = [{ name = "Oma2FA contributors" }]
+authors = [{ name = "Jon Kinney" }]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Operating System :: POSIX :: Linux",

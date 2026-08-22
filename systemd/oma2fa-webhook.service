@@ -1,9 +1,9 @@
 [Unit]
 Description=Oma2FA authenticated phone webhook
-Documentation=file:%E/omarchy/plugins/io.github.oma2fa/README.md
+Documentation=file:%E/omarchy/plugins/io.github.jondkinney.oma2fa/README.md
 Wants=network-online.target
 After=network-online.target
-ConditionPathExists=%E/omarchy/plugins/io.github.oma2fa/bin/oma2fa
+ConditionPathExists=%E/omarchy/plugins/io.github.jondkinney.oma2fa/bin/oma2fa
 ConditionPathExists=%E/oma2fa/webhook.env
 
 [Service]
@@ -11,7 +11,7 @@ Type=simple
 Environment=PYTHONUNBUFFERED=1
 Environment=OMA2FA_WEBHOOK_ENABLED=1
 EnvironmentFile=%E/oma2fa/webhook.env
-ExecStart=/usr/bin/env %E/omarchy/plugins/io.github.oma2fa/bin/oma2fa webhook
+ExecStart=/usr/bin/env %E/omarchy/plugins/io.github.jondkinney.oma2fa/bin/oma2fa webhook
 Restart=on-failure
 RestartSec=3s
 UMask=0077

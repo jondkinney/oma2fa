@@ -9,7 +9,7 @@ Item {
   id: root
 
   // Injected by omarchy-shell's overlay loader. `service` is the matching
-  // io.github.oma2fa service instance, not a second backend connection.
+  // io.github.jondkinney.oma2fa service instance, not a second backend connection.
   property var shell: null
   property var manifest: null
   property var service: null
@@ -49,7 +49,7 @@ Item {
 
   function pluginId() {
     return (root.manifest && root.manifest.id)
-      ? String(root.manifest.id) : "io.github.oma2fa"
+      ? String(root.manifest.id) : "io.github.jondkinney.oma2fa"
   }
 
   function parseJson(raw, fallback) {

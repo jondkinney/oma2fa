@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
-  "id": "io.github.oma2fa",
+  "id": "io.github.jondkinney.oma2fa",
   "name": "Oma2FA",
   "version": "0.2.0",
-  "author": "Oma2FA contributors",
+  "author": "Jon Kinney",
   "license": "MIT",
   "description": "Privately collect recent SMS verification codes and paste one on demand.",
   "kinds": [

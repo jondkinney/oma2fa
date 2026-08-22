@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-PLUGIN_ID="io.github.oma2fa"
+PLUGIN_ID="io.github.jondkinney.oma2fa"
 BIND_BEGIN="-- BEGIN OMA2FA MANAGED BINDING"
 BIND_END="-- END OMA2FA MANAGED BINDING"
 MARKER_NAME=".oma2fa-managed"

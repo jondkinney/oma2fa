@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-PLUGIN_ID="io.github.oma2fa"
+PLUGIN_ID="io.github.jondkinney.oma2fa"
 BINDING="SUPER + ALT + V"
 BINDING_NORMALIZED="SUPERALTV"
 BIND_BEGIN="-- BEGIN OMA2FA MANAGED BINDING"
@@ -287,7 +287,7 @@ install_binding_if_free() {
 
   {
     printf '\n%s\n' "$BIND_BEGIN"
-    printf '%s\n' 'o.bind("SUPER + ALT + V", "2FA codes", "omarchy-shell shell toggle io.github.oma2fa '\''{}'\''")'
+    printf '%s\n' 'o.bind("SUPER + ALT + V", "2FA codes", "omarchy-shell shell toggle io.github.jondkinney.oma2fa '\''{}'\''")'
     printf '%s\n' "$BIND_END"
   } >>"$tmp_file"
   mv -- "$tmp_file" "$bindings_file"

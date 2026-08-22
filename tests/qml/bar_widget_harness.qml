@@ -55,7 +55,7 @@ ShellRoot {
     }
     button.pressed(Qt.LeftButton)
     if (fakeShell.toggleCalls !== 1
-        || fakeShell.lastToggleId !== "io.github.oma2fa"
+        || fakeShell.lastToggleId !== "io.github.jondkinney.oma2fa"
         || fakeShell.lastTogglePayload !== "{}") {
       harness.fail("left click did not use the expected in-process toggle")
       return
@@ -111,7 +111,7 @@ ShellRoot {
     property string lastTogglePayload: ""
 
     function serviceFor(pluginId) {
-      return pluginId === "io.github.oma2fa" ? sharedService : null
+      return pluginId === "io.github.jondkinney.oma2fa" ? sharedService : null
     }
 
     function toggle(pluginId, payload) {

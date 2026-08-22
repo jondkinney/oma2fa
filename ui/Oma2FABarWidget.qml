@@ -9,7 +9,7 @@ import qs.Ui
 // backend-provided error text never enter the bar or its tooltip.
 BarWidget {
   id: root
-  moduleName: "io.github.oma2fa"
+  moduleName: "io.github.jondkinney.oma2fa"
 
   readonly property var omaService: {
     var host = root.bar && root.bar.shell ? root.bar.shell : null

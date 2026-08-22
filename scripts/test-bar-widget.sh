@@ -20,7 +20,7 @@ command -v jq >/dev/null 2>&1 || fail "jq is required"
 command -v python3 >/dev/null 2>&1 || fail "python3 is required"
 
 jq -e '
-  .id == "io.github.oma2fa"
+  .id == "io.github.jondkinney.oma2fa"
   and (.kinds | index("bar-widget") != null)
   and (.entryPoints.barWidget | type == "string" and length > 0)
   and .barWidget.allowMultiple == false

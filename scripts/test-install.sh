@@ -122,7 +122,7 @@ case "$*" in
     printf '%s\n' "$polls" >"$OMA2FA_TEST_REGISTRY/polls"
     if (( polls >= 2 )); then
       : >"$OMA2FA_TEST_REGISTRY/known"
-      target="$XDG_CONFIG_HOME/omarchy/plugins/io.github.oma2fa"
+      target="$XDG_CONFIG_HOME/omarchy/plugins/io.github.jondkinney.oma2fa"
       if [[ -f "$target/manifest.json" ]]; then
         kinds=$(jq -c '.kinds' "$target/manifest.json")
         if [[ -f "$OMA2FA_TEST_REGISTRY/stale-kinds-polls" ]]; then
@@ -144,7 +144,7 @@ case "$*" in
           jq -e 'index("bar-widget") != null' <<<"$kinds" >/dev/null; then
           enabled=false
         fi
-        jq -cn --arg id io.github.oma2fa --argjson kinds "$kinds" \
+        jq -cn --arg id io.github.jondkinney.oma2fa --argjson kinds "$kinds" \
           --argjson enabled "$enabled" '[{id: $id, kinds: $kinds, enabled: $enabled}]'
       else
         printf '%s\n' '[]'
@@ -204,10 +204,10 @@ printf '%s\n' 'bar:left:2' >"$OMA2FA_TEST_STATE"
 "$repo_root/scripts/install.sh" --yes
 [[ $(<"$OMA2FA_TEST_STATE") == "bar:left:2" ]] ||
   fail "managed reinstall moved an already placed bar widget"
-[[ $(grep -Fxc 'disable io.github.oma2fa' "$OMA2FA_TEST_CALLS" || true) == 0 ]] ||
+[[ $(grep -Fxc 'disable io.github.jondkinney.oma2fa' "$OMA2FA_TEST_CALLS" || true) == 0 ]] ||
   fail "managed reinstall unnecessarily disabled an existing bar widget"
 
-target="$test_config/omarchy/plugins/io.github.oma2fa"
+target="$test_config/omarchy/plugins/io.github.jondkinney.oma2fa"
 bindings="$test_config/hypr/bindings.lua"
 [[ -f "$target/manifest.json" ]] || fail "plugin manifest was not installed"
 bar_widget_entrypoint=$(jq -er '.entryPoints.barWidget' "$target/manifest.json")
@@ -227,7 +227,7 @@ grep -Fqx 'managed-by=oma2fa-install-v1' "$target/.oma2fa-managed" ||
 [[ $(grep -Fxc -- '-- END OMA2FA MANAGED BINDING' "$bindings") == 1 ]] ||
   fail "managed binding end marker was duplicated during reinstall"
 find "$test_config/omarchy/plugins" -mindepth 1 -maxdepth 1 \
-  -type d -name '.io.github.oma2fa.previous.*' -print -quit | grep -q . ||
+  -type d -name '.io.github.jondkinney.oma2fa.previous.*' -print -quit | grep -q . ||
   fail "reinstall did not preserve the previous managed copy"
 
 "$repo_root/scripts/uninstall.sh" --yes
@@ -235,7 +235,7 @@ find "$test_config/omarchy/plugins" -mindepth 1 -maxdepth 1 \
 [[ $(grep -Fxc -- '-- BEGIN OMA2FA MANAGED BINDING' "$bindings" || true) == 0 ]] ||
   fail "uninstall left the managed binding in place"
 find "$test_config/omarchy/plugins" -mindepth 1 -maxdepth 1 \
-  -type d -name '.io.github.oma2fa.bak.test*' -print -quit | grep -q . ||
+  -type d -name '.io.github.jondkinney.oma2fa.bak.test*' -print -quit | grep -q . ||
   fail "uninstall did not preserve a recoverable plugin backup"
 
 # Upgrade from the original service/overlay-only manifest. Its enabled id is
@@ -246,7 +246,7 @@ install -d -m 0755 -- "$target"
 cat >"$target/manifest.json" <<'LEGACY_MANIFEST'
 {
   "schemaVersion": 1,
-  "id": "io.github.oma2fa",
+  "id": "io.github.jondkinney.oma2fa",
   "name": "Oma2FA",
   "version": "0.1.0",
   "kinds": ["service", "overlay"],
@@ -255,7 +255,7 @@ cat >"$target/manifest.json" <<'LEGACY_MANIFEST'
 LEGACY_MANIFEST
 cat >"$target/.oma2fa-managed" <<'LEGACY_MARKER'
 managed-by=oma2fa-install-v1
-plugin-id=io.github.oma2fa
+plugin-id=io.github.jondkinney.oma2fa
 installed-at=legacy-test
 LEGACY_MARKER
 printf '%s\n' plugin >"$OMA2FA_TEST_STATE"
@@ -273,7 +273,7 @@ jq -e '.kinds | index("bar-widget") == null' "$target/manifest.json" >/dev/null 
   fail "failed legacy upgrade did not restore the old manifest"
 [[ $(<"$OMA2FA_TEST_STATE") == "plugin" ]] ||
   fail "failed legacy upgrade did not restore the old plugins[] location"
-expected_rollback_calls=$'disable io.github.oma2fa\nenable io.github.oma2fa\ndisable io.github.oma2fa\ndisable io.github.oma2fa\nenable io.github.oma2fa'
+expected_rollback_calls=$'disable io.github.jondkinney.oma2fa\nenable io.github.jondkinney.oma2fa\ndisable io.github.jondkinney.oma2fa\ndisable io.github.jondkinney.oma2fa\nenable io.github.jondkinney.oma2fa'
 [[ $(<"$OMA2FA_TEST_CALLS") == "$expected_rollback_calls" ]] ||
   fail "failed legacy upgrade did not disable the new widget before restoring the old plugin"
 
@@ -284,9 +284,9 @@ printf '%s\n' 3 >"$OMA2FA_TEST_REGISTRY/stale-kinds-polls"
   fail "legacy plugins[] entry was not migrated to the right bar section"
 [[ $(<"$OMA2FA_TEST_REGISTRY/stale-kinds-polls") == 0 ]] ||
   fail "upgrade did not wait for the shell registry to expose bar-widget"
-[[ $(grep -Fxc 'disable io.github.oma2fa' "$OMA2FA_TEST_CALLS" || true) == 1 ]] ||
+[[ $(grep -Fxc 'disable io.github.jondkinney.oma2fa' "$OMA2FA_TEST_CALLS" || true) == 1 ]] ||
   fail "legacy upgrade did not remove its old plugins[] entry exactly once"
-[[ $(grep -Fxc 'enable io.github.oma2fa' "$OMA2FA_TEST_CALLS" || true) == 1 ]] ||
+[[ $(grep -Fxc 'enable io.github.jondkinney.oma2fa' "$OMA2FA_TEST_CALLS" || true) == 1 ]] ||
   fail "legacy upgrade did not re-enable the new bar widget exactly once"
 
 "$repo_root/scripts/uninstall.sh" --yes
