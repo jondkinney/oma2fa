@@ -190,7 +190,10 @@ systemctl --user enable --now oma2fa-webhook.service
 
 Check it with `systemctl --user status oma2fa-webhook.service`. The UI bridge
 and standalone webhook share the owner-only runtime store; the picker refreshes
-that store whenever it opens.
+that store whenever it opens. The standalone listener also publishes a minimal
+owner-only heartbeat so the picker can report it as an active transport. That
+heartbeat contains only a format version, timestamp, and random process-instance
+identifier; it contains no bind address, token, sender, message body, or code.
 
 ## Requirements
 

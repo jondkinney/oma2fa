@@ -5,6 +5,7 @@ import hmac
 import ipaddress
 import json
 import os
+import secrets
 import socket
 import stat
 import threading
@@ -21,7 +22,8 @@ from .util import clean_source
 DEFAULT_WEBHOOK_PORT = 8765
 MAX_WEBHOOK_BODY_BYTES = 16_384
 WEBHOOK_READ_TIMEOUT_SECONDS = 5
-WEBHOOK_MAINTENANCE_SECONDS = 15
+WEBHOOK_MAINTENANCE_SECONDS = 5
+WEBHOOK_HEARTBEAT_MAX_AGE_SECONDS = 20
 MAX_WEBHOOK_WORKERS = 16
 WEBHOOK_TRANSPORT_LOOPBACK = "loopback"
 WEBHOOK_TRANSPORT_VPN = "vpn"
@@ -210,6 +212,8 @@ class WebhookServer:
         self._maintenance_seconds = maintenance_seconds
         self._maintenance_stop = threading.Event()
         self._serving = threading.Event()
+        self._startup_complete = threading.Event()
+        self._heartbeat_instance = secrets.token_urlsafe(18)
 
     @property
     def address(self) -> tuple[str, int]:
@@ -342,20 +346,49 @@ class WebhookServer:
         if self._thread is not None and self._thread.is_alive():
             return
         self._thread = threading.Thread(
-            target=self.serve_forever,
+            target=self._serve_in_thread,
             name="oma2fa-webhook",
             daemon=True,
         )
         self._thread.start()
-        self._serving.wait(timeout=1)
+        if not self._startup_complete.wait(timeout=1) or not self._serving.is_set():
+            raise WebhookConfigError("webhook could not publish private health state")
+
+    def _serve_in_thread(self) -> None:
+        try:
+            self.serve_forever()
+        except StoreError:
+            # start() reports a generic startup failure without a thread traceback.
+            return
+
+    def _publish_heartbeat(self, *, required: bool = False) -> None:
+        try:
+            self.service.store.publish_webhook_heartbeat(self._heartbeat_instance)
+        except StoreError:
+            if required:
+                raise
+            # A prior lease expires, so other processes fail closed.
+            return
+
+    def _clear_heartbeat(self) -> None:
+        try:
+            self.service.store.clear_webhook_heartbeat(self._heartbeat_instance)
+        except StoreError:
+            # A stale heartbeat is treated as stopped after the freshness window.
+            return
 
     def serve_forever(self) -> None:
-        self._start_maintenance()
-        self._serving.set()
         try:
+            self._publish_heartbeat(required=True)
+            self._start_maintenance()
+            self._serving.set()
+            self._startup_complete.set()
             self._server.serve_forever()
         finally:
+            self._startup_complete.set()
             self._serving.clear()
+            self._maintenance_stop.set()
+            self._clear_heartbeat()
 
     def _start_maintenance(self) -> None:
         if self._maintenance_thread is not None and self._maintenance_thread.is_alive():
@@ -369,6 +402,7 @@ class WebhookServer:
 
     def _maintain(self) -> None:
         while not self._maintenance_stop.wait(self._maintenance_seconds):
+            self._publish_heartbeat()
             try:
                 self.service.snapshot()
             except Exception:
@@ -387,3 +421,4 @@ class WebhookServer:
             and self._maintenance_thread is not threading.current_thread()
         ):
             self._maintenance_thread.join(timeout=2)
+        self._clear_heartbeat()

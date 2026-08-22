@@ -24,9 +24,13 @@ MAX_STATE_BYTES = 1_048_576
 MAX_RECORDS = 256
 MAX_SEEN_ENTRIES = 4_096
 RUNTIME_MARKER = ".oma2fa-runtime"
+WEBHOOK_HEARTBEAT_VERSION = 1
+MAX_WEBHOOK_HEARTBEAT_BYTES = 512
+WEBHOOK_HEARTBEAT_FUTURE_SKEW_SECONDS = 5
 DEFAULT_TTL_SECONDS = 600
 DEFAULT_DEDUPE_WINDOW_SECONDS = 120
 _VALID_CODE = re.compile(r"[A-Za-z0-9]{4,10}")
+_VALID_HEARTBEAT_INSTANCE = re.compile(r"[A-Za-z0-9_-]{16,128}")
 
 
 class StoreError(RuntimeError):
@@ -148,6 +152,7 @@ class RuntimeStore:
         self.directory = runtime_directory(directory)
         self.path = self.directory / "codes.json"
         self.lock_path = self.directory / ".lock"
+        self.webhook_heartbeat_path = self.directory / "webhook-heartbeat.json"
         self.ttl_seconds = ttl
         self.dedupe_window_seconds = dedupe_window
         self._clock = clock
@@ -157,6 +162,14 @@ class RuntimeStore:
     def opaque_message_key(source: str, message_id: str) -> str:
         material = f"{clean_source(source)}\0{message_id}".encode("utf-8", "surrogatepass")
         return hashlib.blake2b(material, digest_size=20).hexdigest()
+
+    @staticmethod
+    def _validate_heartbeat_instance(instance_id: str) -> None:
+        if (
+            not isinstance(instance_id, str)
+            or _VALID_HEARTBEAT_INSTANCE.fullmatch(instance_id) is None
+        ):
+            raise ValueError("webhook heartbeat instance is invalid")
 
     def _ensure_directory(self) -> None:
         broad_paths = {
@@ -201,7 +214,7 @@ class RuntimeStore:
                 marker = self.directory / RUNTIME_MARKER
                 if not marker.exists():
                     contents = {item.name for item in self.directory.iterdir()}
-                    known_legacy = {"codes.json", ".lock"}
+                    known_legacy = {"codes.json", ".lock", "webhook-heartbeat.json"}
                     if contents - known_legacy:
                         raise StoreError("runtime path is not a dedicated Oma2FA directory")
                     flags = (
@@ -353,6 +366,151 @@ class RuntimeStore:
             if temporary is not None:
                 with contextlib.suppress(OSError):
                     os.unlink(temporary)
+
+    def _load_webhook_heartbeat_unlocked(self) -> dict[str, Any] | None:
+        flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0)
+        flags |= getattr(os, "O_NOFOLLOW", 0)
+        try:
+            descriptor = os.open(self.webhook_heartbeat_path, flags)
+        except FileNotFoundError:
+            return None
+        except OSError as error:
+            raise StoreError("could not open webhook health state") from error
+        try:
+            info = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(info.st_mode)
+                or info.st_uid != os.getuid()
+                or info.st_nlink != 1
+                or info.st_mode & 0o077
+                or info.st_size > MAX_WEBHOOK_HEARTBEAT_BYTES
+            ):
+                raise StoreError("webhook health state is not a private regular file")
+            with os.fdopen(descriptor, "r", encoding="utf-8") as handle:
+                descriptor = -1
+                value = json.load(handle)
+        except (OSError, UnicodeError, ValueError) as error:
+            raise StoreError("webhook health state is invalid") from error
+        finally:
+            if descriptor >= 0:
+                os.close(descriptor)
+
+        if not isinstance(value, dict) or set(value) != {
+            "version",
+            "instance_id",
+            "updated_at",
+        }:
+            raise StoreError("webhook health state is invalid")
+        version = value["version"]
+        instance_id = value["instance_id"]
+        updated_at = value["updated_at"]
+        if isinstance(version, bool) or version != WEBHOOK_HEARTBEAT_VERSION:
+            raise StoreError("webhook health state has an unsupported format")
+        try:
+            self._validate_heartbeat_instance(instance_id)
+            valid_updated_at = math.isfinite(float(updated_at))
+        except (OverflowError, TypeError, ValueError):
+            valid_updated_at = False
+        if (
+            not valid_updated_at
+            or isinstance(updated_at, bool)
+            or not isinstance(updated_at, (int, float))
+        ):
+            raise StoreError("webhook health state is invalid")
+        return value
+
+    def publish_webhook_heartbeat(self, instance_id: str) -> None:
+        """Atomically publish minimal, owner-only standalone webhook health."""
+
+        self._validate_heartbeat_instance(instance_id)
+        try:
+            updated_at = float(self._clock())
+        except (OverflowError, TypeError, ValueError) as error:
+            raise StoreError("could not publish webhook health state") from error
+        if not math.isfinite(updated_at):
+            raise StoreError("could not publish webhook health state")
+        value = {
+            "version": WEBHOOK_HEARTBEAT_VERSION,
+            "instance_id": instance_id,
+            "updated_at": updated_at,
+        }
+        temporary: str | None = None
+        with self._locked():
+            try:
+                payload = (
+                    json.dumps(value, ensure_ascii=True, separators=(",", ":")) + "\n"
+                ).encode("utf-8")
+                if len(payload) > MAX_WEBHOOK_HEARTBEAT_BYTES:
+                    raise StoreError("webhook health state is unexpectedly large")
+                descriptor, temporary = tempfile.mkstemp(
+                    prefix=".webhook-heartbeat.", suffix=".tmp", dir=self.directory
+                )
+                os.fchmod(descriptor, 0o600)
+                with os.fdopen(descriptor, "wb") as handle:
+                    handle.write(payload)
+                    handle.flush()
+                    os.fsync(handle.fileno())
+                os.replace(temporary, self.webhook_heartbeat_path)
+                temporary = None
+                os.chmod(self.webhook_heartbeat_path, 0o600)
+                directory_fd = os.open(
+                    self.directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                )
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+            except OSError as error:
+                raise StoreError("could not publish webhook health state") from error
+            finally:
+                if temporary is not None:
+                    with contextlib.suppress(OSError):
+                        os.unlink(temporary)
+
+    def webhook_heartbeat_state(self, *, max_age_seconds: float) -> str:
+        """Return ``missing``, ``fresh``, or ``stale`` without exposing metadata."""
+
+        try:
+            max_age = float(max_age_seconds)
+            now = float(self._clock())
+        except (OverflowError, TypeError, ValueError) as error:
+            raise ValueError("webhook heartbeat age must be positive and finite") from error
+        if (
+            isinstance(max_age_seconds, bool)
+            or not math.isfinite(max_age)
+            or max_age <= 0
+            or not math.isfinite(now)
+        ):
+            raise ValueError("webhook heartbeat age must be positive and finite")
+        with self._locked():
+            value = self._load_webhook_heartbeat_unlocked()
+        if value is None:
+            return "missing"
+        age = now - float(value["updated_at"])
+        if age < -WEBHOOK_HEARTBEAT_FUTURE_SKEW_SECONDS or age > max_age:
+            return "stale"
+        return "fresh"
+
+    def clear_webhook_heartbeat(self, instance_id: str) -> bool:
+        """Remove this publisher's heartbeat without deleting a replacement's."""
+
+        self._validate_heartbeat_instance(instance_id)
+        with self._locked():
+            value = self._load_webhook_heartbeat_unlocked()
+            if value is None or value["instance_id"] != instance_id:
+                return False
+            try:
+                os.unlink(self.webhook_heartbeat_path)
+                directory_fd = os.open(
+                    self.directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+                )
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+            except OSError as error:
+                raise StoreError("could not clear webhook health state") from error
+        return True
 
     @staticmethod
     def _prune(value: dict[str, Any], now: float) -> bool:

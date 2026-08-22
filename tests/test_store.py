@@ -11,6 +11,7 @@ from pathlib import Path
 from oma2fa.store import (
     MAX_SEEN_ENTRIES,
     MAX_STATE_BYTES,
+    MAX_WEBHOOK_HEARTBEAT_BYTES,
     RuntimeStore,
     StoreError,
 )
@@ -53,6 +54,91 @@ class StoreTests(unittest.TestCase):
         snapshot = self.store.snapshot()
         self.assertEqual(snapshot["codes"][0]["code"], "123456")
         self.assertTrue(snapshot["codes"][0]["received_at"].endswith("Z"))
+
+    def test_webhook_heartbeat_is_private_fresh_stale_and_nonce_owned(self) -> None:
+        first = "first-webhook-instance"
+        second = "second-webhook-instance"
+        self.store.publish_webhook_heartbeat(first)
+        path = self.store.webhook_heartbeat_path
+        self.assertEqual(stat.S_IMODE(path.stat().st_mode), 0o600)
+        self.assertEqual(self.store.webhook_heartbeat_state(max_age_seconds=45), "fresh")
+        payload = json.loads(path.read_text())
+        self.assertEqual(set(payload), {"version", "instance_id", "updated_at"})
+        self.assertNotIn("token", path.read_text().casefold())
+
+        self.clock.value += 46
+        self.assertEqual(self.store.webhook_heartbeat_state(max_age_seconds=45), "stale")
+        self.store.publish_webhook_heartbeat(second)
+        self.assertFalse(self.store.clear_webhook_heartbeat(first))
+        self.assertEqual(self.store.webhook_heartbeat_state(max_age_seconds=45), "fresh")
+        self.assertTrue(self.store.clear_webhook_heartbeat(second))
+        self.assertEqual(self.store.webhook_heartbeat_state(max_age_seconds=45), "missing")
+
+    def test_webhook_heartbeat_rejects_extra_fields_and_symlinks(self) -> None:
+        self.store.list()
+        path = self.store.webhook_heartbeat_path
+        sentinel = "private-token-and-message-123456"
+        path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "instance_id": "fixture-webhook-instance",
+                    "updated_at": self.clock.value,
+                    "token": sentinel,
+                }
+            )
+        )
+        os.chmod(path, 0o600)
+        with self.assertRaises(StoreError):
+            self.store.webhook_heartbeat_state(max_age_seconds=45)
+
+        path.unlink()
+        outside = Path(self.temporary.name) / "outside-heartbeat"
+        outside.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "instance_id": "fixture-webhook-instance",
+                    "updated_at": self.clock.value,
+                }
+            )
+        )
+        os.chmod(outside, 0o600)
+        path.symlink_to(outside)
+        with self.assertRaises(StoreError):
+            self.store.webhook_heartbeat_state(max_age_seconds=45)
+
+    def test_webhook_heartbeat_rejects_unsafe_files_and_future_state(self) -> None:
+        self.store.list()
+        path = self.store.webhook_heartbeat_path
+        valid = {
+            "version": 1,
+            "instance_id": "fixture-webhook-instance",
+            "updated_at": self.clock.value,
+        }
+
+        path.write_text(json.dumps(valid))
+        os.chmod(path, 0o644)
+        with self.assertRaises(StoreError):
+            self.store.webhook_heartbeat_state(max_age_seconds=45)
+
+        path.write_text("x" * (MAX_WEBHOOK_HEARTBEAT_BYTES + 1))
+        os.chmod(path, 0o600)
+        with self.assertRaises(StoreError):
+            self.store.webhook_heartbeat_state(max_age_seconds=45)
+
+        valid["updated_at"] = self.clock.value + 6
+        path.write_text(json.dumps(valid))
+        os.chmod(path, 0o600)
+        self.assertEqual(self.store.webhook_heartbeat_state(max_age_seconds=45), "stale")
+
+        path.unlink()
+        outside = Path(self.temporary.name) / "hardlinked-heartbeat"
+        outside.write_text(json.dumps({**valid, "updated_at": self.clock.value}))
+        os.chmod(outside, 0o600)
+        os.link(outside, path)
+        with self.assertRaises(StoreError):
+            self.store.webhook_heartbeat_state(max_age_seconds=45)
 
     def test_expiry_physically_prunes_state(self) -> None:
         self.add()

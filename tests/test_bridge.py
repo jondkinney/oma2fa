@@ -13,7 +13,7 @@ from oma2fa.activation import ActivationError, ActivationResult
 from oma2fa.bridge import MAX_REQUEST_CHARS, JsonBridge
 from oma2fa.service import Oma2FAService
 from oma2fa.store import RuntimeStore
-from oma2fa.webhook import WebhookConfig
+from oma2fa.webhook import WEBHOOK_HEARTBEAT_MAX_AGE_SECONDS, WebhookConfig
 from tests.test_store import Clock
 
 
@@ -151,6 +151,58 @@ class BridgeTests(unittest.TestCase):
         self.assertEqual(source["detail"], "receive events unavailable")
         self.assertEqual(source["history_examined"], 0)
         self.assertEqual(source["events_examined"], 0)
+
+    def test_standalone_webhook_heartbeat_updates_bridge_status(self) -> None:
+        self.bridge.start()
+        source = self.service.status()["sources"]["webhook"]
+        self.assertFalse(source["enabled"])
+        self.assertFalse(source["running"])
+
+        instance = "fixture-webhook-instance"
+        self.store.publish_webhook_heartbeat(instance)
+        before = len([line for line in self.lines() if line.get("event") == "status"])
+        self.bridge._maintain_once()
+        source = self.service.status()["sources"]["webhook"]
+        self.assertTrue(source["enabled"])
+        self.assertTrue(source["running"])
+        after = len([line for line in self.lines() if line.get("event") == "status"])
+        self.assertEqual(after, before + 1)
+
+        self.clock.value += WEBHOOK_HEARTBEAT_MAX_AGE_SECONDS + 1
+        self.bridge._maintain_once()
+        source = self.service.status()["sources"]["webhook"]
+        self.assertTrue(source["enabled"])
+        self.assertFalse(source["running"])
+        self.assertEqual(source["detail"], "not responding")
+
+        self.store.publish_webhook_heartbeat(instance)
+        self.bridge.dispatch("status", {})
+        self.assertTrue(self.service.status()["sources"]["webhook"]["running"])
+        self.assertTrue(self.store.clear_webhook_heartbeat(instance))
+        self.bridge.dispatch("refresh", {})
+        source = self.service.status()["sources"]["webhook"]
+        self.assertFalse(source["enabled"])
+        self.assertFalse(source["running"])
+
+    def test_tampered_webhook_heartbeat_fails_closed_without_leaking(self) -> None:
+        self.store.list()
+        sentinel = "private-token-message-and-code-246810"
+        self.store.webhook_heartbeat_path.write_text(
+            json.dumps(
+                {
+                    "version": 1,
+                    "instance_id": "fixture-webhook-instance",
+                    "updated_at": self.clock.value,
+                    "body": sentinel,
+                }
+            )
+        )
+        self.store.webhook_heartbeat_path.chmod(0o600)
+        self.bridge.dispatch("status", {})
+        source = self.service.status()["sources"]["webhook"]
+        self.assertFalse(source["running"])
+        self.assertEqual(source["detail"], "status unavailable")
+        self.assertNotIn(sentinel, self.output.getvalue())
 
     def test_activate_copies_before_deleting_without_secret_in_response(self) -> None:
         record_id = self.add_code()

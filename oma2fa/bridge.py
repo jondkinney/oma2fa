@@ -9,7 +9,13 @@ from typing import Any, TextIO
 from .activation import ActivationError, Activator
 from .blueferry import BlueFerryAdapter
 from .service import Oma2FAService
-from .webhook import WebhookConfig, WebhookConfigError, WebhookServer
+from .store import StoreError
+from .webhook import (
+    WEBHOOK_HEARTBEAT_MAX_AGE_SECONDS,
+    WebhookConfig,
+    WebhookConfigError,
+    WebhookServer,
+)
 
 MAX_REQUEST_CHARS = 65_536
 MAINTENANCE_SECONDS = 15
@@ -56,6 +62,7 @@ class JsonBridge:
         self._stop = threading.Event()
         self._maintenance: threading.Thread | None = None
         self._last_record_ids: tuple[str, ...] = ()
+        self._webhook_source_status: dict[str, Any] | None = None
         self._blueferry_source_status: dict[str, Any] = {
             "connected": False,
             "events_available": None,
@@ -135,18 +142,61 @@ class JsonBridge:
         self._update_blueferry_source(**dict(status))
         self.emit_status()
 
+    def _set_webhook_source(self, **status: Any) -> bool:
+        next_status = dict(status)
+        with self._publish_lock:
+            if self._webhook_source_status == next_status:
+                return False
+            self._webhook_source_status = next_status
+            self.service.update_source_status("webhook", **next_status)
+        return True
+
+    def _refresh_external_webhook_status(self) -> bool:
+        if self.webhook_config.enabled:
+            return False
+        try:
+            state = self.service.store.webhook_heartbeat_state(
+                max_age_seconds=WEBHOOK_HEARTBEAT_MAX_AGE_SECONDS
+            )
+        except StoreError:
+            return self._set_webhook_source(
+                available=True,
+                enabled=False,
+                running=False,
+                detail="status unavailable",
+            )
+        if state == "fresh":
+            return self._set_webhook_source(
+                available=True,
+                enabled=True,
+                running=True,
+                detail="ready",
+            )
+        if state == "stale":
+            return self._set_webhook_source(
+                available=True,
+                enabled=True,
+                running=False,
+                detail="not responding",
+            )
+        return self._set_webhook_source(
+            available=True,
+            enabled=False,
+            running=False,
+            detail="disabled",
+        )
+
     def _start_webhook(self) -> None:
         if not self.webhook_config.enabled:
-            self.service.update_source_status(
-                "webhook", available=True, enabled=False, running=False, detail="disabled"
-            )
+            self._refresh_external_webhook_status()
             return
+        candidate: WebhookServer | None = None
         try:
-            self.webhook = WebhookServer(self.service, self.webhook_config)
-            self.webhook.start()
-            bind, port = self.webhook.address
-            self.service.update_source_status(
-                "webhook",
+            candidate = WebhookServer(self.service, self.webhook_config)
+            candidate.start()
+            self.webhook = candidate
+            bind, port = candidate.address
+            self._set_webhook_source(
                 available=True,
                 enabled=True,
                 running=True,
@@ -155,9 +205,10 @@ class JsonBridge:
                 detail="ready",
             )
         except (OSError, WebhookConfigError):
+            if candidate is not None:
+                candidate.stop()
             self.webhook = None
-            self.service.update_source_status(
-                "webhook",
+            self._set_webhook_source(
                 available=True,
                 enabled=True,
                 running=False,
@@ -181,23 +232,31 @@ class JsonBridge:
         )
         self._maintenance.start()
 
+    def _maintain_once(self) -> None:
+        with self._publish_lock:
+            webhook_changed = self._refresh_external_webhook_status()
+            snapshot = self.service.snapshot()
+            record_ids = tuple(item["id"] for item in snapshot["codes"])
+            records_changed = record_ids != self._last_record_ids
+            if records_changed:
+                self._last_record_ids = record_ids
+                self.emit({"event": "snapshot", "data": snapshot})
+            if records_changed or webhook_changed:
+                self.emit_status()
+        if self.enable_blueferry:
+            self.blueferry.maintain()
+
     def _maintain(self) -> None:
         while not self._stop.wait(MAINTENANCE_SECONDS):
-            with self._publish_lock:
-                snapshot = self.service.snapshot()
-                record_ids = tuple(item["id"] for item in snapshot["codes"])
-                if record_ids != self._last_record_ids:
-                    self._last_record_ids = record_ids
-                    self.emit({"event": "snapshot", "data": snapshot})
-                    self.emit_status()
-            if self.enable_blueferry:
-                self.blueferry.maintain()
+            self._maintain_once()
 
     def dispatch(self, method: str, args: Mapping[str, Any]) -> object:
         if method == "status":
+            self._refresh_external_webhook_status()
             return self.service.status()
         if method == "refresh":
             requested = self.enable_blueferry and self.blueferry.refresh()
+            self._refresh_external_webhook_status()
             snapshot = self.emit_snapshot()
             self.emit_status()
             return {

@@ -13,6 +13,7 @@ from oma2fa.service import Oma2FAService
 from oma2fa.store import RuntimeStore, StoreError
 from oma2fa.webhook import (
     MAX_WEBHOOK_WORKERS,
+    WEBHOOK_HEARTBEAT_MAX_AGE_SECONDS,
     WebhookConfig,
     WebhookConfigError,
     WebhookServer,
@@ -89,6 +90,59 @@ class WebhookTests(unittest.TestCase):
         duplicate_status, duplicate = self.request("POST", body=self.payload())
         self.assertEqual(duplicate_status, 200)
         self.assertEqual(duplicate["reason"], "duplicate")
+
+    def test_server_lifecycle_publishes_and_clears_private_heartbeat(self) -> None:
+        self.assertEqual(
+            self.store.webhook_heartbeat_state(
+                max_age_seconds=WEBHOOK_HEARTBEAT_MAX_AGE_SECONDS
+            ),
+            "fresh",
+        )
+        heartbeat = self.store.webhook_heartbeat_path.read_text()
+        self.assertNotIn(TOKEN, heartbeat)
+        self.assertNotIn("123456", heartbeat)
+        self.server.stop()
+        self.assertEqual(
+            self.store.webhook_heartbeat_state(
+                max_age_seconds=WEBHOOK_HEARTBEAT_MAX_AGE_SECONDS
+            ),
+            "missing",
+        )
+
+    def test_heartbeat_renews_and_startup_failure_is_generic(self) -> None:
+        self.clock.value += WEBHOOK_HEARTBEAT_MAX_AGE_SECONDS + 1
+        deadline = time.monotonic() + 1
+        state = "stale"
+        while time.monotonic() < deadline:
+            state = self.store.webhook_heartbeat_state(
+                max_age_seconds=WEBHOOK_HEARTBEAT_MAX_AGE_SECONDS
+            )
+            if state == "fresh":
+                break
+            time.sleep(0.01)
+        self.assertEqual(state, "fresh")
+
+        failed = WebhookServer(
+            self.service,
+            WebhookConfig(True, "127.0.0.1", 0, TOKEN),
+            allow_ephemeral_port=True,
+        )
+        with (
+            patch.object(
+                self.store,
+                "publish_webhook_heartbeat",
+                side_effect=StoreError("private fixture path"),
+            ),
+            self.assertRaisesRegex(WebhookConfigError, "private health state"),
+        ):
+            failed.start()
+        failed.stop()
+        self.assertEqual(
+            self.store.webhook_heartbeat_state(
+                max_age_seconds=WEBHOOK_HEARTBEAT_MAX_AGE_SECONDS
+            ),
+            "fresh",
+        )
 
     def test_bad_auth_method_path_media_type_and_size_are_rejected(self) -> None:
         status, _ = self.request("POST", body=self.payload(), token="wrong")

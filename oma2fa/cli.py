@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import signal
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -122,12 +123,19 @@ def _run(args: argparse.Namespace) -> int:
     if args.command == "webhook":
         config = _webhook_config(args, standalone=True)
         server = WebhookServer(service, config)
+        previous_sigterm = signal.getsignal(signal.SIGTERM)
+
+        def stop_for_sigterm(_signum: int, _frame: object) -> None:
+            raise KeyboardInterrupt
+
+        signal.signal(signal.SIGTERM, stop_for_sigterm)
         try:
             server.serve_forever()
         except KeyboardInterrupt:
             pass
         finally:
             server.stop()
+            signal.signal(signal.SIGTERM, previous_sigterm)
         return 0
     raise ValueError("unsupported command")
 

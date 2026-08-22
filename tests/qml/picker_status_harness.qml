@@ -40,6 +40,16 @@ ShellRoot {
     }
     expectStatus("Ready  ·  2 active transports  ·  0 codes")
 
+    fakeService.status = {
+      ready: true,
+      sources: {
+        manual: { available: true, detail: "ready" },
+        blueferry: { available: true, running: true, connected: true },
+        webhook: { available: true, enabled: true, running: false }
+      }
+    }
+    expectStatus("Ready  ·  1 active transport  ·  0 codes")
+
     console.log("OMA2FA_PICKER_STATUS_PASS")
     picker.destroy()
     Qt.exit(0)
