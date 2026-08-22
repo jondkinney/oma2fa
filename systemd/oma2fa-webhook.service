@@ -1,0 +1,40 @@
+[Unit]
+Description=Oma2FA authenticated phone webhook
+Documentation=file:%E/omarchy/plugins/io.github.oma2fa/README.md
+Wants=network-online.target
+After=network-online.target
+ConditionPathExists=%E/omarchy/plugins/io.github.oma2fa/bin/oma2fa
+ConditionPathExists=%E/oma2fa/webhook.env
+
+[Service]
+Type=simple
+Environment=PYTHONUNBUFFERED=1
+Environment=OMA2FA_WEBHOOK_ENABLED=1
+EnvironmentFile=%E/oma2fa/webhook.env
+ExecStart=/usr/bin/env %E/omarchy/plugins/io.github.oma2fa/bin/oma2fa webhook
+Restart=on-failure
+RestartSec=3s
+UMask=0077
+RuntimeDirectory=oma2fa
+RuntimeDirectoryMode=0700
+RuntimeDirectoryPreserve=yes
+
+NoNewPrivileges=true
+PrivateDevices=true
+PrivateTmp=true
+ProtectClock=true
+ProtectControlGroups=true
+ProtectHome=read-only
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+CapabilityBoundingSet=
+ReadWritePaths=%t/oma2fa
+
+[Install]
+WantedBy=default.target
