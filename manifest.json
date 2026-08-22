@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "id": "io.github.oma2fa",
+  "name": "Oma2FA",
+  "version": "0.2.0",
+  "author": "Oma2FA contributors",
+  "license": "MIT",
+  "description": "Privately collect recent SMS verification codes and paste one on demand.",
+  "kinds": [
+    "service",
+    "overlay",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "overlay": "Picker.qml",
+    "barWidget": "ui/Oma2FABarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Oma2FA",
+    "description": "Open recent verification codes without exposing them in the bar.",
+    "category": "Security",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
