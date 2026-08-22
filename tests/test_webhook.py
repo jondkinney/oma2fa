@@ -223,6 +223,44 @@ class WebhookConfigTests(unittest.TestCase):
         with self.assertRaises(WebhookConfigError):
             WebhookConfig(True, "127.0.0.1", 0, TOKEN).validate()
 
+    def test_non_loopback_bind_requires_explicit_vpn_transport(self) -> None:
+        with self.assertRaisesRegex(WebhookConfigError, "TRANSPORT=vpn"):
+            WebhookConfig(True, "100.82.77.125", 8765, TOKEN).validate()
+
+        WebhookConfig(True, "100.82.77.125", 8765, TOKEN, "vpn").validate()
+        WebhookConfig(True, "fd7a:115c:a1e0::153b:4d7d", 8765, TOKEN, "vpn").validate()
+
+    def test_loopback_binds_need_no_transport_assertion(self) -> None:
+        for bind in ("localhost", "127.0.0.1", "127.42.0.1", "::1"):
+            with self.subTest(bind=bind):
+                WebhookConfig(True, bind, 8765, TOKEN).validate()
+
+    def test_wildcards_hostnames_and_unknown_transports_fail_closed(self) -> None:
+        for bind in ("0.0.0.0", "::"):
+            with (
+                self.subTest(bind=bind),
+                self.assertRaisesRegex(WebhookConfigError, "wildcard"),
+            ):
+                WebhookConfig(True, bind, 8765, TOKEN, "vpn").validate()
+        with self.assertRaisesRegex(WebhookConfigError, "literal IP"):
+            WebhookConfig(True, "oma2fa.example", 8765, TOKEN, "vpn").validate()
+        with self.assertRaisesRegex(WebhookConfigError, "loopback.*vpn"):
+            WebhookConfig(True, "127.0.0.1", 8765, TOKEN, "tls").validate()
+
+    def test_vpn_transport_can_be_asserted_from_environment(self) -> None:
+        with patch.dict(
+            os.environ,
+            {
+                "OMA2FA_WEBHOOK_ENABLED": "1",
+                "OMA2FA_WEBHOOK_TOKEN": TOKEN,
+                "OMA2FA_WEBHOOK_BIND": "100.82.77.125",
+                "OMA2FA_WEBHOOK_TRANSPORT": "VPN",
+            },
+            clear=True,
+        ):
+            config = WebhookConfig.from_env()
+        self.assertEqual(config.transport, "vpn")
+
 
 if __name__ == "__main__":
     unittest.main()

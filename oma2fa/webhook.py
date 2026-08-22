@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import ipaddress
 import json
 import os
+import socket
 import stat
 import threading
 from dataclasses import dataclass, field
@@ -21,6 +23,9 @@ MAX_WEBHOOK_BODY_BYTES = 16_384
 WEBHOOK_READ_TIMEOUT_SECONDS = 5
 WEBHOOK_MAINTENANCE_SECONDS = 15
 MAX_WEBHOOK_WORKERS = 16
+WEBHOOK_TRANSPORT_LOOPBACK = "loopback"
+WEBHOOK_TRANSPORT_VPN = "vpn"
+_WEBHOOK_TRANSPORTS = {WEBHOOK_TRANSPORT_LOOPBACK, WEBHOOK_TRANSPORT_VPN}
 
 
 class WebhookConfigError(ValueError):
@@ -29,6 +34,20 @@ class WebhookConfigError(ValueError):
 
 def _enabled(value: str | None) -> bool:
     return (value or "").strip().casefold() in {"1", "true", "yes", "on"}
+
+
+def _bind_ip(value: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
+    """Return a literal bind address, reserving ``None`` for localhost."""
+
+    candidate = value.strip()
+    if candidate.casefold() == "localhost":
+        return None
+    try:
+        return ipaddress.ip_address(candidate)
+    except ValueError as error:
+        raise WebhookConfigError(
+            "webhook bind must be localhost or a literal IP address"
+        ) from error
 
 
 def _read_token_file(path: str) -> str:
@@ -65,6 +84,7 @@ class WebhookConfig:
     bind: str = "127.0.0.1"
     port: int = DEFAULT_WEBHOOK_PORT
     token: str = field(default="", repr=False)
+    transport: str = WEBHOOK_TRANSPORT_LOOPBACK
 
     @classmethod
     def from_env(
@@ -95,7 +115,18 @@ class WebhookConfig:
             if configured_token_file
             else os.environ.get("OMA2FA_WEBHOOK_TOKEN", "")
         )
-        config = cls(active, configured_bind, configured_port, token)
+        configured_transport = (
+            os.environ.get("OMA2FA_WEBHOOK_TRANSPORT", WEBHOOK_TRANSPORT_LOOPBACK)
+            .strip()
+            .casefold()
+        )
+        config = cls(
+            enabled=active,
+            bind=configured_bind,
+            port=configured_port,
+            token=token,
+            transport=configured_transport,
+        )
         config.validate()
         return config
 
@@ -103,6 +134,21 @@ class WebhookConfig:
         minimum_port = 0 if allow_ephemeral_port else 1
         if not self.bind or not minimum_port <= self.port <= 65_535:
             raise WebhookConfigError("webhook bind address or port is invalid")
+        if self.transport not in _WEBHOOK_TRANSPORTS:
+            raise WebhookConfigError("webhook transport must be 'loopback' or 'vpn'")
+        address = _bind_ip(self.bind)
+        if address is not None and address.is_unspecified:
+            raise WebhookConfigError("webhook wildcard binds are not allowed")
+        if (
+            self.enabled
+            and address is not None
+            and not address.is_loopback
+            and self.transport != WEBHOOK_TRANSPORT_VPN
+        ):
+            raise WebhookConfigError(
+                "non-loopback webhook binds require "
+                "OMA2FA_WEBHOOK_TRANSPORT=vpn and an exact VPN interface address"
+            )
         if self.enabled and len(self.token.encode("utf-8")) < 24:
             raise WebhookConfigError("webhook token must contain at least 24 bytes")
 
@@ -133,6 +179,10 @@ class _WebhookHTTPServer(ThreadingHTTPServer):
             self._worker_slots.release()
 
 
+class _WebhookHTTPServerV6(_WebhookHTTPServer):
+    address_family = socket.AF_INET6
+
+
 class WebhookServer:
     def __init__(
         self,
@@ -148,7 +198,13 @@ class WebhookServer:
         self.service = service
         self.config = config
         self._token_digest = hashlib.sha256(config.token.encode("utf-8")).digest()
-        self._server = _WebhookHTTPServer((config.bind, config.port), self._handler())
+        address = _bind_ip(config.bind)
+        server_class = (
+            _WebhookHTTPServerV6
+            if isinstance(address, ipaddress.IPv6Address)
+            else _WebhookHTTPServer
+        )
+        self._server = server_class((config.bind, config.port), self._handler())
         self._thread: threading.Thread | None = None
         self._maintenance_thread: threading.Thread | None = None
         self._maintenance_seconds = maintenance_seconds

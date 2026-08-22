@@ -82,10 +82,21 @@ mode by extracting the code on the phone and sending only the derived record.
 The webhook inside the UI bridge is disabled unless
 `OMA2FA_WEBHOOK_ENABLED=1` is set or the bridge is started with `--webhook`.
 The standalone `oma2fa webhook` command enables only the listener. Its defaults
-are `127.0.0.1:8765`; a phone cannot reach that loopback address. Configure a
-reachable address only on a trusted network, preferably a WireGuard/Tailscale
-interface or behind an HTTPS reverse proxy. The built-in server is HTTP, so a
-bearer token sent over ordinary Wi-Fi is not protected from network observers.
+are `127.0.0.1:8765`; a phone cannot reach that loopback address. The built-in
+server is HTTP and rejects non-loopback and wildcard binds unless you explicitly
+declare an exact VPN address. Never expose it directly over ordinary Ethernet,
+Wi-Fi, port forwarding, or the public internet: both the reusable bearer token
+and the message body would be visible to network observers.
+
+There are two supported remote-access patterns:
+
+- Bind to the computer's exact Tailscale/WireGuard address and set
+  `OMA2FA_WEBHOOK_TRANSPORT=vpn`. Encryption is then supplied by the VPN.
+- Keep Oma2FA on `127.0.0.1` and put an HTTPS reverse proxy on the same computer
+  in front of it. The phone must use the proxy's `https://` URL.
+
+The `vpn` setting is an explicit security assertion, not VPN detection. Set it
+only when the bind address belongs exclusively to an active encrypted tunnel.
 
 Configuration is environment-only so the secret never appears in process
 arguments:
@@ -95,6 +106,7 @@ arguments:
 | `OMA2FA_WEBHOOK_ENABLED` | Set to `1` to enable the listener in bridge mode. |
 | `OMA2FA_WEBHOOK_BIND` | Listen address; defaults to `127.0.0.1`. |
 | `OMA2FA_WEBHOOK_PORT` | Listen port; defaults to `8765`. |
+| `OMA2FA_WEBHOOK_TRANSPORT` | Must be `vpn` for a non-loopback bind; omit for loopback/TLS-proxy mode. |
 | `OMA2FA_WEBHOOK_TOKEN_FILE` | Preferred path to a mode-`0600` bearer-token file. |
 | `OMA2FA_WEBHOOK_TOKEN` | Direct token fallback; avoid persistent environment files containing it. |
 
@@ -143,10 +155,21 @@ OMA2FA_WEBHOOK_TOKEN_FILE=/home/your-user/.config/oma2fa/webhook-token
 ```
 
 Keep that file private (`chmod 0600 ~/.config/oma2fa/webhook.env`). In an iOS
-Shortcut or trusted Android automation, configure a JSON `POST` to the reachable
-`http://<computer>:8765/v1/ingest` URL and add the bearer token as the
-`Authorization` header. Prefer extracting or pre-filtering on the phone when
-the automation system permits it.
+Shortcut or trusted Android automation, configure a JSON `POST` to either
+`http://<vpn-address>:8765/v1/ingest` over the VPN or the reverse proxy's
+`https://<hostname>/v1/ingest` URL. Add the bearer token as the `Authorization`
+header. Prefer extracting or pre-filtering on the phone when the automation
+system permits it.
+
+For direct VPN access, use an exact address rather than `0.0.0.0`, `::`, or a
+hostname:
+
+```ini
+OMA2FA_WEBHOOK_BIND=100.64.0.10
+OMA2FA_WEBHOOK_TRANSPORT=vpn
+OMA2FA_WEBHOOK_PORT=8765
+OMA2FA_WEBHOOK_TOKEN_FILE=/home/your-user/.config/oma2fa/webhook-token
+```
 
 Then install and enable the unit explicitly:
 
