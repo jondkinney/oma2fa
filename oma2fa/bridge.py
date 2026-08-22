@@ -56,6 +56,12 @@ class JsonBridge:
         self._stop = threading.Event()
         self._maintenance: threading.Thread | None = None
         self._last_record_ids: tuple[str, ...] = ()
+        self._blueferry_source_status: dict[str, Any] = {
+            "connected": False,
+            "events_available": None,
+            "degraded": True,
+            "detail": "starting",
+        }
         self.blueferry = blueferry or BlueFerryAdapter(
             on_threads=self._on_blueferry_threads,
             on_status=self._on_blueferry_status,
@@ -89,15 +95,24 @@ class JsonBridge:
         self.emit_snapshot()
         self.emit_status()
 
+    def _update_blueferry_source(self, **status: Any) -> None:
+        """Merge independent BlueFerry health and ingestion observations."""
+
+        with self._publish_lock:
+            self._blueferry_source_status.update(status)
+            self.service.update_source_status(
+                "blueferry", **dict(self._blueferry_source_status)
+            )
+
     def _on_blueferry_threads(self, threads: object) -> None:
         counts = self.service.ingest_blueferry_threads(threads)
-        self.service.update_source_status(
-            "blueferry",
+        self._update_blueferry_source(
             available=True,
             running=True,
             examined=counts["examined"],
             accepted=counts["accepted"],
-            detail="ready",
+            history_examined=counts["examined"],
+            history_accepted=counts["accepted"],
         )
         # Also publishes TTL pruning and a no-code history refresh.
         self.emit_snapshot()
@@ -105,19 +120,19 @@ class JsonBridge:
 
     def _on_blueferry_events(self, events: object) -> None:
         counts = self.service.ingest_blueferry_events(events)
-        self.service.update_source_status(
-            "blueferry",
+        self._update_blueferry_source(
             available=True,
             running=True,
             examined=counts["examined"],
             accepted=counts["accepted"],
-            detail="ready",
+            events_examined=counts["examined"],
+            events_accepted=counts["accepted"],
         )
         self.emit_snapshot()
         self.emit_status()
 
     def _on_blueferry_status(self, status: Mapping[str, Any]) -> None:
-        self.service.update_source_status("blueferry", **dict(status))
+        self._update_blueferry_source(**dict(status))
         self.emit_status()
 
     def _start_webhook(self) -> None:
@@ -154,8 +169,8 @@ class JsonBridge:
         if self.enable_blueferry:
             self.blueferry.start()
         else:
-            self.service.update_source_status(
-                "blueferry", available=False, running=False, detail="disabled"
+            self._update_blueferry_source(
+                available=False, running=False, connected=False, detail="disabled"
             )
         self.emit_status()
         self.emit_snapshot()

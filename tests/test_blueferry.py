@@ -107,7 +107,7 @@ class BlueFerryTests(unittest.TestCase):
             **kwargs,
         )
 
-    def test_raw_events_load_only_after_a_successful_threads_snapshot(self) -> None:
+    def test_raw_events_load_even_when_threads_request_fails(self) -> None:
         order: list[tuple[str, object]] = []
         raw_events = [{"kind": "sms_received", "fixture": True}]
 
@@ -138,8 +138,9 @@ class BlueFerryTests(unittest.TestCase):
                 "ok": False,
             }
         )
-        self.assertEqual(order, [])
+        self.assertEqual(order, [("loader", None), ("events", raw_events)])
 
+        order.clear()
         self.assertTrue(adapter.refresh())
         successful = json.loads(process.stdin.lines[-1])
         threads = [{"name": "Fixture thread", "messages": []}]
@@ -155,9 +156,9 @@ class BlueFerryTests(unittest.TestCase):
         self.assertEqual(
             order,
             [
-                ("threads", threads),
                 ("loader", None),
                 ("events", raw_events),
+                ("threads", threads),
             ],
         )
 
@@ -185,11 +186,14 @@ class BlueFerryTests(unittest.TestCase):
 
         self.assertEqual(self.threads, [threads])
         self.assertEqual(self.events, [])
-        self.assertEqual(self.statuses, [])
+        self.assertFalse(self.statuses[-1]["connected"])
+        self.assertTrue(self.statuses[-1]["degraded"])
+        self.assertFalse(self.statuses[-1]["events_available"])
+        self.assertEqual(self.statuses[-1]["detail"], "receive events unavailable")
         self.assertNotIn(private_fixture_body, json.dumps(self.statuses))
         self.assertNotIn("654321", json.dumps(self.statuses))
 
-    def test_raw_events_are_not_loaded_after_thread_processing_failure(self) -> None:
+    def test_raw_events_load_before_thread_processing_failure(self) -> None:
         loaded = 0
 
         def on_threads(_value: object) -> None:
@@ -203,17 +207,60 @@ class BlueFerryTests(unittest.TestCase):
         adapter = self.adapter(on_threads=on_threads, event_loader=event_loader)
         process = FakeProcess()
         adapter._process = process
-        request_id = adapter.request("threads")
-        assert request_id is not None
+        self.assertTrue(adapter.refresh())
+        request_id = json.loads(process.stdin.lines[-1])["id"]
 
         adapter.handle_payload(
             {"id": request_id, "method": "threads", "ok": True, "result": []}
         )
 
-        self.assertEqual(loaded, 0)
-        self.assertEqual(self.events, [])
+        self.assertEqual(loaded, 1)
+        self.assertEqual(self.events, [[]])
         self.assertEqual(self.statuses[-1]["detail"], "message processing failed")
         self.assertNotIn("private fixture failure", json.dumps(self.statuses))
+
+    def test_raw_event_handler_failure_is_degraded_and_private(self) -> None:
+        private_fixture_body = "handler saw verification code 987654"
+
+        def on_events(_value: object) -> None:
+            raise RuntimeError(private_fixture_body)
+
+        adapter = self.adapter(
+            on_events=on_events,
+            event_loader=lambda: [{"kind": "sms_received", "body": private_fixture_body}],
+        )
+        process = FakeProcess()
+        adapter._process = process
+        self.assertTrue(adapter.refresh())
+        request_id = json.loads(process.stdin.lines[-1])["id"]
+
+        adapter.handle_payload(
+            {"id": request_id, "method": "threads", "ok": True, "result": []}
+        )
+
+        self.assertEqual(self.threads, [[]])
+        self.assertFalse(self.statuses[-1]["connected"])
+        self.assertTrue(self.statuses[-1]["degraded"])
+        self.assertFalse(self.statuses[-1]["events_available"])
+        self.assertEqual(self.statuses[-1]["detail"], "receive events unavailable")
+        self.assertNotIn(private_fixture_body, json.dumps(self.statuses))
+        self.assertNotIn("987654", json.dumps(self.statuses))
+
+    def test_incompatible_raw_event_response_is_degraded(self) -> None:
+        adapter = self.adapter(event_loader=lambda: {"unsupported": True})
+        process = FakeProcess()
+        adapter._process = process
+        self.assertTrue(adapter.refresh())
+        request_id = json.loads(process.stdin.lines[-1])["id"]
+
+        adapter.handle_payload(
+            {"id": request_id, "method": "threads", "ok": True, "result": []}
+        )
+
+        self.assertEqual(self.events, [])
+        self.assertFalse(self.statuses[-1]["connected"])
+        self.assertTrue(self.statuses[-1]["degraded"])
+        self.assertFalse(self.statuses[-1]["events_available"])
 
     def test_raw_events_from_a_stale_helper_are_discarded(self) -> None:
         replacement = FakeProcess()
@@ -226,12 +273,7 @@ class BlueFerryTests(unittest.TestCase):
         adapter = self.adapter(event_loader=event_loader)
         original = FakeProcess()
         adapter._process = original
-        request_id = adapter.request("threads")
-        assert request_id is not None
-
-        adapter.handle_payload(
-            {"id": request_id, "method": "threads", "ok": True, "result": []}
-        )
+        self.assertFalse(adapter._ingest_recent_events(original))
 
         self.assertEqual(self.events, [])
 
@@ -286,10 +328,23 @@ class BlueFerryTests(unittest.TestCase):
         self.assertEqual([item["method"] for item in requests], ["threads", "threads"])
         self.assertEqual(self.threads, [[{"fixture": True}]])
 
+    def test_maintenance_polls_events_without_requesting_threads(self) -> None:
+        raw_events = [{"kind": "sms_received", "body": "Your code is 123456"}]
+        adapter = self.adapter(event_loader=lambda: raw_events)
+        process = FakeProcess()
+        adapter._process = process
+
+        self.assertTrue(adapter.maintain())
+
+        self.assertEqual(self.events, [raw_events])
+        self.assertEqual(process.stdin.lines, [])
+        self.assertTrue(self.statuses[-1]["events_available"])
+
     def test_status_response_is_reduced_to_safe_fields(self) -> None:
         adapter = self.adapter()
         process = FakeProcess()
         adapter._process = process
+        self.assertTrue(adapter._ingest_recent_events(process))
         request_id = adapter.request("status")
         assert request_id is not None
         adapter.handle_payload(
@@ -308,7 +363,42 @@ class BlueFerryTests(unittest.TestCase):
             }
         )
         self.assertTrue(self.statuses[-1]["connected"])
+        self.assertTrue(self.statuses[-1]["events_available"])
         self.assertNotIn("private_extra", self.statuses[-1])
+
+    def test_backend_ready_is_gated_until_receive_events_are_available(self) -> None:
+        private_fixture_body = "private event-loader failure 246810"
+
+        def event_loader() -> object:
+            raise RuntimeError(private_fixture_body)
+
+        adapter = self.adapter(event_loader=event_loader)
+        process = FakeProcess()
+        adapter._process = process
+        self.assertFalse(adapter._ingest_recent_events(process))
+        request_id = adapter.request("status")
+        assert request_id is not None
+
+        adapter.handle_payload(
+            {
+                "id": request_id,
+                "method": "status",
+                "ok": True,
+                "result": {
+                    "daemon": True,
+                    "map": True,
+                    "connectivity_state": "ready",
+                },
+            }
+        )
+
+        status = self.statuses[-1]
+        self.assertFalse(status["connected"])
+        self.assertTrue(status["degraded"])
+        self.assertFalse(status["events_available"])
+        self.assertEqual(status["detail"], "receive events unavailable")
+        self.assertNotIn(private_fixture_body, json.dumps(status))
+        self.assertNotIn("246810", json.dumps(status))
 
     def test_status_changed_events_are_coalesced_until_response(self) -> None:
         adapter = self.adapter()
@@ -350,6 +440,8 @@ class BlueFerryTests(unittest.TestCase):
 
         requests = [json.loads(line) for line in process.stdin.lines]
         self.assertEqual([item["method"] for item in requests], ["status", "threads"])
+        self.assertEqual(self.events, [[]])
+        self.assertTrue(self.statuses[-1]["events_available"])
         adapter.stop()
 
     def test_refreshes_during_startup_coalesce_into_initial_threads_request(self) -> None:

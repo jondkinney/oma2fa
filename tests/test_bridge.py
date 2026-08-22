@@ -129,6 +129,29 @@ class BridgeTests(unittest.TestCase):
         self.assertFalse(surrogate_response["ok"])
         self.assertEqual(surrogate_response["method"], "\ud800")
 
+    def test_blueferry_ingestion_preserves_degraded_event_capability(self) -> None:
+        self.bridge._on_blueferry_status(
+            {
+                "available": True,
+                "running": True,
+                "connected": False,
+                "events_available": False,
+                "degraded": True,
+                "detail": "receive events unavailable",
+            }
+        )
+
+        self.bridge._on_blueferry_threads([])
+        self.bridge._on_blueferry_events([])
+
+        source = self.service.status()["sources"]["blueferry"]
+        self.assertFalse(source["connected"])
+        self.assertFalse(source["events_available"])
+        self.assertTrue(source["degraded"])
+        self.assertEqual(source["detail"], "receive events unavailable")
+        self.assertEqual(source["history_examined"], 0)
+        self.assertEqual(source["events_examined"], 0)
+
     def test_activate_copies_before_deleting_without_secret_in_response(self) -> None:
         record_id = self.add_code()
         self.output.seek(0)

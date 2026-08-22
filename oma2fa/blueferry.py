@@ -59,6 +59,7 @@ class BlueFerryAdapter:
         self._reader: threading.Thread | None = None
         self._write_lock = threading.Lock()
         self._state_lock = threading.Lock()
+        self._event_load_lock = threading.Lock()
         self._lifecycle_lock = threading.RLock()
         self._next_id = 1
         self._pending: dict[int, str] = {}
@@ -68,6 +69,12 @@ class BlueFerryAdapter:
         self._status_pending = False
         self._status_requested_at: float | None = None
         self._startup_waiting_for_status = False
+        # Message Access Profile readiness does not prove that BlueFerry can
+        # expose raw receive events. Short-code SMS messages can be absent from
+        # its thread model, so keep that capability explicit and fail closed.
+        self._events_available: bool | None = None
+        self._backend_connected = False
+        self._backend_detail = "unknown"
         self._stopping = False
 
     @property
@@ -80,7 +87,31 @@ class BlueFerryAdapter:
         return process is not None and process.poll() is None
 
     def _status(self, **values: Any) -> None:
+        with self._state_lock:
+            events_available = self._events_available
+        if self.on_events is not None:
+            values.setdefault("events_available", events_available)
+            if events_available is False:
+                values.setdefault("degraded", True)
+                if values.get("connected") is True:
+                    values["connected"] = False
+                    values["detail"] = "receive events unavailable"
+            elif events_available is True:
+                values.setdefault("degraded", False)
+            elif values.get("connected") is True:
+                # Until the bounded Events1 probe succeeds, claiming the SMS
+                # transport is connected would hide the short-code blind spot.
+                values["connected"] = False
+                values.setdefault("degraded", True)
+                values["detail"] = "checking receive events"
         self.on_status({"available": self.installed, **values})
+
+    def _reset_capabilities_locked(self) -> None:
+        """Reset process-specific capability state while holding _state_lock."""
+
+        self._events_available = None
+        self._backend_connected = False
+        self._backend_detail = "unknown"
 
     def start(self) -> bool:
         with self._lifecycle_lock:
@@ -100,6 +131,7 @@ class BlueFerryAdapter:
                 self._status_pending = False
                 self._status_requested_at = None
                 self._startup_waiting_for_status = False
+                self._reset_capabilities_locked()
             self._stopping = False
             try:
                 process = self._popen(
@@ -185,6 +217,7 @@ class BlueFerryAdapter:
                 self._status_pending = False
                 self._status_requested_at = None
                 self._startup_waiting_for_status = False
+                self._reset_capabilities_locked()
             self._status(running=False, connected=False, detail="bridge stopped")
             self._stop_process(process)
 
@@ -192,6 +225,12 @@ class BlueFerryAdapter:
         process = self._process
         if process is None or process.poll() is not None:
             return self.start()
+        # Raw receive events are a separate capability from conversation
+        # history. Poll them before requesting threads so a failed or wedged
+        # history request cannot suppress short-code ingestion.
+        self._ingest_recent_events(process)
+        if self._process is not process or process.poll() is not None:
+            return False
         return self._request_threads()
 
     def _request_threads(self) -> bool:
@@ -294,29 +333,37 @@ class BlueFerryAdapter:
                     self._status_pending = False
                     self._status_requested_at = None
                     self._startup_waiting_for_status = False
+                    self._reset_capabilities_locked()
 
-            if not restart_startup and not restart_threads:
-                return self.request_status() if retry_status else True
+            if restart_startup or restart_threads:
+                # A live helper can be wedged inside a D-Bus call. Detach and
+                # stop it before starting a clean versioned bridge; queued
+                # retries alone would eventually consume every request worker.
+                process = self._process
+                self._process = None
+                self._reader = None
+                self._stopping = True
+                self._status(
+                    running=False,
+                    connected=False,
+                    detail=(
+                        "startup request timed out"
+                        if restart_startup
+                        else "history request timed out"
+                    ),
+                )
+                if process is not None:
+                    self._stop_process(process)
+                return self.start()
 
-            # A live helper can be wedged inside a D-Bus call. Detach and stop
-            # it before starting a clean versioned bridge; queued retries alone
-            # would eventually consume every BlueFerry request worker.
+            result = self.request_status() if retry_status else True
             process = self._process
-            self._process = None
-            self._reader = None
-            self._stopping = True
-            self._status(
-                running=False,
-                connected=False,
-                detail=(
-                    "startup request timed out"
-                    if restart_startup
-                    else "history request timed out"
-                ),
-            )
-            if process is not None:
-                self._stop_process(process)
-            return self.start()
+
+        if process is not None:
+            # The outer service invokes maintenance periodically. Poll outside
+            # the lifecycle lock so a slow provider cannot block stop/restart.
+            self._ingest_recent_events(process)
+        return result
 
     @staticmethod
     def _stop_process(process: subprocess.Popen[str]) -> None:
@@ -379,6 +426,7 @@ class BlueFerryAdapter:
                         self._status_pending = False
                         self._status_requested_at = None
                         self._startup_waiting_for_status = False
+                        self._reset_capabilities_locked()
                     unexpected = not self._stopping
                     if process.poll() is None:
                         process.terminate()
@@ -411,7 +459,7 @@ class BlueFerryAdapter:
         client_class = client_module.BackendClient
         records = client_class().events(["sms_received"], BLUEFERRY_EVENT_LIMIT)
         if not isinstance(records, Sequence) or isinstance(records, (str, bytes)):
-            return []
+            raise TypeError("unsupported BlueFerry event response")
 
         events: list[dict[str, Any]] = []
         for index, record in enumerate(records):
@@ -422,44 +470,80 @@ class BlueFerryAdapter:
                 to_dict = getattr(record, "to_dict", None)
                 if callable(to_dict):
                     candidate = to_dict()
-            if isinstance(candidate, Mapping):
-                events.append(
-                    {
-                        field: candidate[field]
-                        for field in _BLUEFERRY_EVENT_FIELDS
-                        if field in candidate
-                    }
-                )
+            if not isinstance(candidate, Mapping):
+                raise TypeError("unsupported BlueFerry event record")
+            events.append(
+                {
+                    field: candidate[field]
+                    for field in _BLUEFERRY_EVENT_FIELDS
+                    if field in candidate
+                }
+            )
         return events
 
-    def _ingest_recent_events(self, process: subprocess.Popen[str]) -> None:
-        """Supplement threads with raw receives, retaining no payload reference."""
+    def _update_event_capability(
+        self,
+        process: subprocess.Popen[str],
+        *,
+        available: bool,
+    ) -> None:
+        """Publish event capability for an exact helper without leaking errors."""
+
+        if self._process is not process or self._stopping or process.poll() is not None:
+            return
+        with self._state_lock:
+            self._events_available = available
+            backend_connected = self._backend_connected
+            backend_detail = self._backend_detail
+        if available:
+            self._status(
+                running=True,
+                connected=backend_connected,
+                degraded=False,
+                detail=backend_detail,
+            )
+        else:
+            self._status(
+                running=True,
+                connected=False,
+                degraded=True,
+                detail="receive events unavailable",
+            )
+
+    def _ingest_recent_events(self, process: subprocess.Popen[str]) -> bool:
+        """Ingest bounded raw receives independently of thread processing."""
 
         callback = self.on_events
         if callback is None:
-            return
+            return True
+        if not self._event_load_lock.acquire(blocking=False):
+            with self._state_lock:
+                return self._events_available is True
         events: object = None
         try:
             events = self._event_loader()
-        except Exception:
-            # Older BlueFerry releases may not expose ListEvents. Threads are
-            # still a useful fallback, and exception text might contain data.
-            return
-        try:
             if (
                 self._process is not process
                 or self._stopping
                 or process.poll() is not None
             ):
-                return
+                return False
+            if not isinstance(events, Sequence) or isinstance(events, (str, bytes)):
+                self._update_event_capability(process, available=False)
+                return False
             callback(events)
         except Exception:
-            # The primary thread snapshot already succeeded. Preserve that
-            # healthy transport state and retry this optional supplement only
-            # after the next normal refresh.
-            return
+            # Older BlueFerry releases may not expose ListEvents, and handlers
+            # can reject incompatible records. Never copy exception text into
+            # status because it might contain message data.
+            self._update_event_capability(process, available=False)
+            return False
+        else:
+            self._update_event_capability(process, available=True)
+            return True
         finally:
             events = None
+            self._event_load_lock.release()
 
     def handle_payload(self, payload: Mapping[str, Any]) -> None:
         event = payload.get("event")
@@ -503,14 +587,10 @@ class BlueFerryAdapter:
 
         result = payload.get("result")
         if method == "threads":
-            process = self._process
             try:
                 self.on_threads(result)
             except Exception:
                 self._status(running=True, connected=False, detail="message processing failed")
-            else:
-                if process is not None:
-                    self._ingest_recent_events(process)
             if refetch:
                 self.refresh()
         elif method == "status" and isinstance(result, Mapping):
@@ -519,13 +599,21 @@ class BlueFerryAdapter:
             initializing = result.get("initializing") is True
             release = result.get("backend_release")
             connection = result.get("connectivity_state")
+            detail = str(connection)[:64] if isinstance(connection, str) else "unknown"
+            with self._state_lock:
+                self._backend_connected = daemon and map_ready
+                self._backend_detail = detail
             self._status(
                 running=True,
                 connected=daemon and map_ready,
                 initializing=initializing,
-                detail=str(connection)[:64] if isinstance(connection, str) else "unknown",
+                detail=detail,
                 backend_release=str(release)[:32] if isinstance(release, str) else "unknown",
             )
+            if startup_process is not None:
+                # Startup probes Events1 as soon as backend status is known;
+                # it does not wait for the initial thread request to return.
+                self._ingest_recent_events(startup_process)
 
     def stop(self) -> None:
         with self._lifecycle_lock:
