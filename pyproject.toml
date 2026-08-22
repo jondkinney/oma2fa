@@ -10,6 +10,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 license = "MIT"
 authors = [{ name = "Jon Kinney" }]
+urls = { Homepage = "https://github.com/jondkinney/oma2fa", Repository = "https://github.com/jondkinney/oma2fa", Issues = "https://github.com/jondkinney/oma2fa/issues" }
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Operating System :: POSIX :: Linux",

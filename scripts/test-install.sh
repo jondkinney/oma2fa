@@ -210,6 +210,8 @@ printf '%s\n' 'bar:left:2' >"$OMA2FA_TEST_STATE"
 target="$test_config/omarchy/plugins/io.github.jondkinney.oma2fa"
 bindings="$test_config/hypr/bindings.lua"
 [[ -f "$target/manifest.json" ]] || fail "plugin manifest was not installed"
+[[ -f "$target/preview.png" ]] || fail "marketplace preview was not installed"
+[[ ! -e "$target/scripts/test-install.sh" ]] || fail "development tests leaked into install"
 bar_widget_entrypoint=$(jq -er '.entryPoints.barWidget' "$target/manifest.json")
 [[ "$bar_widget_entrypoint" == */* ]] ||
   fail "bar widget entry point is not isolated in a nested plugin directory"

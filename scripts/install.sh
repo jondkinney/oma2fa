@@ -402,6 +402,15 @@ Oma2FA is an unsandboxed Omarchy shell plugin. Installing it will copy code to:
 and enable it in the running Omarchy shell.
 
 WARNING
+if (( INSTALL_BINDING )); then
+  cat >&2 <<WARNING
+If SUPER+ALT+V is free, this will also append one clearly marked binding block to:
+  $bindings_file
+
+Use --no-bind to leave Hyprland configuration unchanged.
+
+WARNING
+fi
 confirm "Install Oma2FA from $repo_root?" || fail "aborted"
 
 if [[ -e "$plugins_dir" || -L "$plugins_dir" ]]; then
@@ -427,7 +436,7 @@ cleanup_stage() {
 }
 trap cleanup_stage EXIT
 
-root_files=(manifest.json pyproject.toml README.md LICENSE)
+root_files=(manifest.json pyproject.toml README.md LICENSE preview.png)
 for root_name in "${root_files[@]}"; do
   [[ -f "$repo_root/$root_name" ]] && copy_root_file "$repo_root/$root_name" "$stage"
 done
@@ -438,9 +447,13 @@ done
 shopt -u nullglob
 [[ -f "$repo_root/qmldir" ]] && copy_root_file "$repo_root/qmldir" "$stage"
 
-for source_dir_name in oma2fa bin scripts systemd docs ui; do
+for source_dir_name in oma2fa bin systemd docs ui; do
   [[ -d "$repo_root/$source_dir_name" ]] || continue
   copy_tree_without_links "$repo_root/$source_dir_name" "$stage/$source_dir_name"
+done
+install -d -m 0755 -- "$stage/scripts"
+for lifecycle_script in install.sh uninstall.sh; do
+  copy_root_file "$repo_root/scripts/$lifecycle_script" "$stage/scripts"
 done
 
 cat >"$stage/$MARKER_NAME" <<MARKER

@@ -9,6 +9,8 @@ manual ingestion, and BlueFerry transport are the first supported path. It is
 not a replacement for passkeys, security keys, or authenticator apps; prefer
 those when a service offers them.
 
+![Oma2FA selecting a recent verification code beside a bank login](preview.png)
+
 ## How it works
 
 ```text
@@ -42,12 +44,18 @@ classifier.
 
 [BlueFerry](https://github.com/erikwb/blueferry) connects a paired iPhone over
 Bluetooth Message Access Profile (MAP). Oma2FA's current adapter consumes
-BlueFerry's `/usr/bin/blueferry-quickshell-bridge` locally. It supplements the
-conversation snapshot with a bounded receive-event query so numeric SMS short
-codes remain detectable even when an older BlueFerry build omits receive-only
-senders from its thread list. Both paths immediately reduce matching messages
-to a code, service label, source, timestamps, and confidence. Full SMS bodies
-are not written to Oma2FA's store.
+BlueFerry's `/usr/bin/blueferry-quickshell-bridge` and `blueferry.client`
+locally. A bounded Events1 receive query is the authoritative code path;
+conversation history is an independent compatibility fallback. Both paths
+immediately reduce matching messages to a code, service label, source,
+timestamps, and confidence. Full SMS bodies are not written to Oma2FA's store.
+
+The adapter has been exercised end to end against pristine BlueFerry `v0.7.7`
+and upstream commit `dee0b097`. Those releases omit receive-only short codes
+from their conversation projection, but retain them in Events1, where Oma2FA
+detects them. Local BlueFerry changes that display short codes in BlueFerry's
+own UI are useful but are not required by Oma2FA. If Events1 is unavailable,
+Oma2FA reports the transport as degraded instead of claiming it is ready.
 
 BlueFerry is the practical local iPhone experiment today, but it is still
 experimental. Pair and verify your phone in BlueFerry before troubleshooting
@@ -190,16 +198,36 @@ that store whenever it opens.
 - Python 3.12 or newer.
 - `jq`, `hyprctl`, `wl-copy`, `wtype`, and coreutils `timeout` (normally
   supplied by Omarchy).
-- BlueFerry and a paired iPhone for automatic local SMS ingestion, or a trusted
-  phone automation configured for the authenticated webhook.
+- BlueFerry `v0.7.7` or newer and a paired iPhone for automatic local SMS
+  ingestion. The backend package must provide both
+  `/usr/bin/blueferry-quickshell-bridge` and the `blueferry.client` Python
+  module. Alternatively, use a trusted phone automation with the authenticated
+  webhook.
 
 The Python core uses the standard library. You do not need a virtual
 environment for the copied plugin.
 
-## Install from a development checkout
+## Install
 
-Review the code first: Omarchy plugins execute unsandboxed inside the
-long-running shell process. Then run:
+Review the source first: Omarchy plugins execute unsandboxed inside the
+long-running shell process.
+
+### Marketplace/Git installation
+
+Install and enable the public repository with Omarchy's native lifecycle:
+
+```bash
+omarchy plugin add https://github.com/jondkinney/oma2fa.git --enable
+```
+
+This creates a Git-managed checkout at
+`~/.config/omarchy/plugins/io.github.jondkinney.oma2fa` and enables the bar
+widget. It does not modify Hyprland keybindings; click the bar icon or use the
+manual toggle command below. Omarchy manages updates and removal for this path.
+
+### Development checkout with optional hotkey
+
+From a reviewed development checkout, run:
 
 ```bash
 ./scripts/install.sh
@@ -216,8 +244,8 @@ The installer:
 1. stages a copy under `~/.config/omarchy/plugins/`;
 2. refuses symlinks and validates the staged plugin with
    `omarchy plugin validate`;
-3. atomically installs it as `io.github.oma2fa`, enables it with the official
-   Omarchy command, and places its widget in the right bar section; and
+3. atomically installs it as `io.github.jondkinney.oma2fa`, enables it with the
+   official Omarchy command, and places its widget in the right bar section; and
 4. checks the live keybinding list before adding a clearly marked
    `SUPER+ALT+V` block to `~/.config/hypr/bindings.lua`.
 
@@ -259,7 +287,7 @@ remains on the clipboard, but Oma2FA does not type it.
 You can always open the picker without a keybinding:
 
 ```bash
-omarchy-shell shell toggle io.github.oma2fa '{}'
+omarchy-shell shell toggle io.github.jondkinney.oma2fa '{}'
 ```
 
 ## CLI and manual ingestion
@@ -314,7 +342,8 @@ Run the core tests and validate the Omarchy manifest from the repository root:
 python -m unittest discover -s tests -v
 omarchy plugin validate .
 bash -n bin/oma2fa bin/oma2fa-bridge scripts/install.sh scripts/uninstall.sh \
-  scripts/test-install.sh scripts/test-bar-widget.sh \
+  scripts/test-install.sh scripts/test-marketplace-install.sh \
+  scripts/test-bar-widget.sh \
   scripts/test-qml-bar-widget.sh scripts/test-qml-picker-status.sh \
   scripts/test-qml-picker-shortcuts.sh
 ./scripts/test-bar-widget.sh
@@ -322,6 +351,7 @@ bash -n bin/oma2fa bin/oma2fa-bridge scripts/install.sh scripts/uninstall.sh \
 ./scripts/test-qml-picker-status.sh
 ./scripts/test-qml-picker-shortcuts.sh
 ./scripts/test-install.sh
+./scripts/test-marketplace-install.sh
 ```
 
 Optional static checks configured by `pyproject.toml`:
@@ -340,10 +370,6 @@ OMA2FA_PYTHON=/path/to/python ./bin/oma2fa --help
 
 ## Uninstall
 
-```bash
-./scripts/uninstall.sh
-```
-
 If you installed the optional webhook unit, stop and remove it first:
 
 ```bash
@@ -352,12 +378,25 @@ rm ~/.config/systemd/user/oma2fa-webhook.service
 systemctl --user daemon-reload
 ```
 
+For a marketplace/Git installation, use Omarchy's native removal command:
+
+```bash
+omarchy plugin remove io.github.jondkinney.oma2fa --yes
+```
+
+For a copy installed by `scripts/install.sh`, use its matching uninstaller:
+
+```bash
+./scripts/uninstall.sh
+```
+
 Use `--yes` for non-interactive confirmation. `--keep-plugin` or
 `--keep-binding` can preserve one part. The uninstaller removes only the exact
 binding marker block and a plugin directory carrying Oma2FA's installer
 ownership marker. It refuses an unmarked directory at the same path. Omarchy's
-official removal command preserves this non-git plugin as a hidden backup, and
-the Hyprland binding file receives its own timestamped backup.
+official removal command deletes a Git-managed checkout. For a non-Git copy,
+the custom uninstaller preserves the plugin as a hidden backup, and the
+Hyprland binding file receives its own timestamped backup.
 
 ## License
 
