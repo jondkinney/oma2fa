@@ -59,49 +59,85 @@ That one action creates a private bearer token, writes the webhook environment
 file, installs the hardened `oma2fa-webhook.service` user unit, reloads the
 user service manager, and enables and starts the listener. It does not need
 `sudo`. The manager can later copy the connection values, disable or re-enable
-the service, and rotate its token. Token rotation requires confirmation and
-the phone must be updated afterward.
+the service, and rotate its token. Its built-in iPhone walkthrough has a
+separate **Copy** action for every Shortcut field. Token rotation requires
+confirmation and the phone must be updated afterward.
 
-### 4. Create the iPhone automation
+### 4. Create the iPhone Shortcut and automation
 
 Apple's [Message automation](https://support.apple.com/guide/shortcuts/apdd711f9dff/ios)
 can filter by sender or text, and Message automations can
 [run without asking](https://support.apple.com/guide/shortcuts/apd602971e63/ios).
-Names can vary slightly between iOS releases, but the resulting automation
-should be:
+Names can vary slightly between iOS releases. Keep Oma2FA's **Phone webhook**
+screen open while you build this: the walkthrough there shows these same
+screens and gives every literal field its own **Copy** button. Copy a field on
+the computer, then send it to the phone with LocalSend, KDE Connect, or another
+local transfer tool.
 
-1. In **Shortcuts → Automation**, add a personal automation using the
-   **Message** trigger.
-2. Restrict **Sender** and/or **Message Contains** when practical so unrelated
-   messages are not forwarded. Common filters include `code`, `verification`,
-   and `one-time`—use multiple automations if you need different phrases.
-3. Select **Run Immediately** (or disable **Ask Before Running**, depending on
-   the iOS version) and create a blank automation.
-4. Back in Oma2FA, choose **Copy webhook URL**. Add a **URL** action in the
-   automation and paste it.
-5. Add **Get Contents of URL**, expand its options, and select **POST**. Apple
-   documents this action in its
+#### 4a. Build `Send to Oma2FA`
+
+1. In **Shortcuts → Library**, tap **+** and name the new shortcut
+   `Send to Oma2FA`.
+2. Configure its input block as **Receive Text from Nowhere**. For no input,
+   choose **Stop and Respond**.
+3. Add **Get Contents of URL**. Paste the value from the walkthrough's **URL**
+   row directly into that action, expand its options, and select **POST**.
+   Apple documents the action in its
    [Shortcuts API guide](https://support.apple.com/guide/shortcuts/apd58d46713f/ios).
-6. Add these headers:
+4. Add these headers. The **Header 1 · value** Copy button supplies the complete
+   `Bearer <generated token>` value, so there is no prefix to assemble by hand:
 
    | Header | Value |
    | --- | --- |
-   | `Authorization` | `Bearer ` followed by the value from **Copy bearer token** |
+   | `Authorization` | `Bearer <generated token>` from **Header 1 · value** |
    | `Content-Type` | `application/json` |
 
-7. Set the request body type to **JSON** and add:
+5. Set the request body type to **JSON** and add exactly:
 
    | Key | Value |
    | --- | --- |
-   | `sender` | The sender variable if available, otherwise a fixed value such as `iPhone` |
-   | `body` | The incoming message/Shortcut Input variable |
+   | `sender` | Fixed text `SMS` |
+   | `body` | The blue **Shortcut Input** magic variable—not the literal words |
    | `source` | The fixed text `ios-shortcuts` |
 
-   `sender` and `body` are required. `timestamp` and `message_id` are optional;
-   omit them unless the automation has trustworthy values for them.
-8. Save the automation and confirm that Tailscale remains connected on the
-   phone. The copied URL and token expire from the desktop clipboard after
-   about 60 seconds, so copy them again if necessary.
+   `sender` and `body` are required. After creating the `body` row, tap its
+   value and insert the blue **Shortcut Input** variable. The Copy button for
+   that row is a spelling reference only. `timestamp` and `message_id` are
+   optional; omit them unless the automation has trustworthy values.
+6. Save the shortcut. Its Library card should look like this:
+
+<p align="center">
+  <img src="assets/shortcut-library.png" width="760" alt="Shortcuts Library showing the pink Send to Oma2FA shortcut card">
+</p>
+
+The complete action should look like the screenshot below. Its address and
+credential are deliberately replaced with placeholders; use the values copied
+from your own Oma2FA installation.
+
+<p align="center">
+  <img src="assets/shortcut-configuration.png" width="430" alt="Send to Oma2FA shortcut configured to POST JSON with Authorization and Content-Type headers">
+</p>
+
+#### 4b. Attach it to incoming Messages
+
+1. Open **Shortcuts → Automation**, tap **+**, and add a personal automation
+   using the **Message** trigger.
+2. Set **Message Contains** to `code`. Add a **Sender** filter only if you know
+   every sender that delivers your codes. You can create additional automations
+   for phrases such as `verification` or `one-time` if needed.
+3. Select **Run Immediately** (or disable **Ask Before Running**, depending on
+   the iOS version), continue, and choose **Send to Oma2FA**.
+4. Save the automation and confirm that Tailscale remains connected on the
+   phone. The Automation tab should look like this:
+
+<p align="center">
+  <img src="assets/shortcut-automation.png" width="760" alt="Shortcuts Automation tab showing a Message containing code running Send to Oma2FA">
+</p>
+
+All copied setup values use a sensitive desktop clipboard offer that expires
+after about 60 seconds, so copy a row again if necessary. The raw-token button
+is retained for troubleshooting, but normal setup should use the complete
+**Header 1 · value** row.
 
 ### 5. Verify receipt
 
@@ -200,9 +236,11 @@ The recommended setup is available in the picker: open the transport summary,
 choose **Manage phone webhook…**, then choose **Set up securely with
 Tailscale**. Oma2FA detects the computer's active Tailscale IPv4 address,
 creates a random bearer token, installs and starts the hardened user service,
-and then offers separate buttons to copy the webhook URL and token. It can also
-enable or disable the listener and rotate its token. Rotation requires a second
-confirmation because the phone must be updated afterward.
+and then offers a field-by-field iPhone walkthrough with privacy-safe reference
+screenshots. Every literal field is individually copyable, including the full
+`Bearer <token>` header value; the token itself never enters QML. The manager
+can also enable or disable the listener and rotate its token. Rotation requires
+a second confirmation because the phone must be updated afterward.
 
 The setup UI deliberately supports only the direct Tailscale path. Connect the
 computer and phone to the same Tailscale network before opening it. Advanced
@@ -529,9 +567,10 @@ The service runs as the current user. Its configuration is normally at
 
 ### The Shortcut reports unauthorized
 
-Copy the bearer token again and ensure the header is exactly
-`Authorization: Bearer <token>`, including the space after `Bearer`. If the
-token was rotated, every phone automation using the old value must be updated.
+Use **Header 1 · value → Copy** in the walkthrough again and ensure the header
+is exactly `Authorization: Bearer <token>`, including the space after `Bearer`.
+If the token was rotated, every phone automation using the old value must be
+updated.
 
 ### The service is ready but no code appears
 
