@@ -63,6 +63,11 @@ the service, and rotate its token. Its built-in iPhone walkthrough has a
 separate **Copy** action for every Shortcut field. Token rotation requires
 confirmation and the phone must be updated afterward.
 
+After the webhook becomes ready, Oma2FA opens the **iPhone setup guide**
+automatically. You can also open it directly from the picker's empty state with
+**Open iPhone setup guide**, or from the connection screen with
+**Open iPhone setup guide →**.
+
 ### 4. Create the iPhone Shortcut and automation
 
 Apple's [Message automation](https://support.apple.com/guide/shortcuts/apdd711f9dff/ios)

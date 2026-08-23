@@ -24,6 +24,7 @@ Item {
   property int clockRevision: 0
   property bool transportDetailsPinned: false
   property bool webhookSetupOpen: false
+  property bool webhookGuideOpen: false
   property bool webhookBusy: false
   property bool tokenRotationArmed: false
   property string webhookNotice: ""
@@ -105,6 +106,7 @@ Item {
     root.cursorActive = false
     root.transportDetailsPinned = false
     root.webhookSetupOpen = false
+    root.webhookGuideOpen = false
     root.webhookBusy = false
     root.tokenRotationArmed = false
     root.webhookNotice = ""
@@ -148,6 +150,7 @@ Item {
     root.cursorActive = false
     root.transportDetailsPinned = false
     root.webhookSetupOpen = false
+    root.webhookGuideOpen = false
     root.webhookBusy = false
     root.tokenRotationArmed = false
     root.webhookNotice = ""
@@ -183,9 +186,11 @@ Item {
     return "Not configured"
   }
 
-  function openWebhookSetup() {
+  function openWebhookSetup(showGuide) {
     root.transportDetailsPinned = false
     root.webhookSetupOpen = true
+    root.webhookGuideOpen = showGuide === true
+      || root.webhookState().configured === true
     root.tokenRotationArmed = false
     root.webhookNotice = ""
     if (root.service && typeof root.service.requestWebhookStatus === "function") {
@@ -193,7 +198,10 @@ Item {
       root.webhookBusy = requestId >= 0
     }
     Qt.callLater(function() {
-      if (root.webhookState().configured === true)
+      webhookSetupFlickable.contentY = 0
+      if (root.webhookGuideOpen)
+        webhookBackButton.forceActiveFocus()
+      else if (root.webhookState().configured === true)
         copyEndpointButton.forceActiveFocus()
       else
         configureWebhookButton.forceActiveFocus()
@@ -202,10 +210,32 @@ Item {
 
   function closeWebhookSetup() {
     root.webhookSetupOpen = false
+    root.webhookGuideOpen = false
     root.webhookBusy = false
     root.tokenRotationArmed = false
     root.webhookNotice = ""
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+  }
+
+  function showWebhookGuide() {
+    root.webhookGuideOpen = true
+    root.webhookNotice = ""
+    webhookSetupFlickable.contentY = 0
+    Qt.callLater(function() { webhookBackButton.forceActiveFocus() })
+  }
+
+  function showWebhookConnection() {
+    root.webhookGuideOpen = false
+    root.webhookNotice = ""
+    webhookSetupFlickable.contentY = 0
+    Qt.callLater(function() {
+      if (root.webhookState().configured === true)
+        copyEndpointButton.forceActiveFocus()
+      else if (configureWebhookButton.enabled)
+        configureWebhookButton.forceActiveFocus()
+      else
+        webhookBackButton.forceActiveFocus()
+    })
   }
 
   function beginWebhookRequest(requestId) {
@@ -611,9 +641,11 @@ Item {
         root.webhookNotice = String(message || "The webhook request failed.")
         return
       }
-      if (method === "webhook_configure_tailscale")
+      if (method === "webhook_configure_tailscale") {
         root.webhookNotice = "Webhook ready. Follow the copyable iPhone steps below."
-      else if (method === "webhook_copy_endpoint")
+        root.webhookGuideOpen = true
+        webhookSetupFlickable.contentY = 0
+      } else if (method === "webhook_copy_endpoint")
         root.webhookNotice = "Webhook URL copied for 60 seconds."
       else if (method === "webhook_copy_token")
         root.webhookNotice = "Raw bearer token copied securely for 60 seconds."
@@ -632,7 +664,9 @@ Item {
           && (method === "webhook_status"
             || method === "webhook_configure_tailscale")) {
         Qt.callLater(function() {
-          if (root.webhookState().configured === true)
+          if (root.webhookGuideOpen)
+            webhookBackButton.forceActiveFocus()
+          else if (root.webhookState().configured === true)
             copyEndpointButton.forceActiveFocus()
           else if (configureWebhookButton.enabled)
             configureWebhookButton.forceActiveFocus()
@@ -904,10 +938,11 @@ Item {
         clip: true
 
         Image {
+          objectName: guideScreenshot.objectName + "-content"
           anchors.fill: parent
           source: guideScreenshot.imageSource
           fillMode: Image.PreserveAspectFit
-          asynchronous: true
+          asynchronous: false
           cache: true
           smooth: true
         }
@@ -1491,6 +1526,18 @@ Item {
               horizontalAlignment: Text.AlignHCenter
               wrapMode: Text.WordWrap
             }
+
+            SetupButton {
+              objectName: "emptyStateSetupButton"
+              width: Math.min(parent.width, Style.space(250))
+              x: (parent.width - width) / 2
+              visible: !root.filterText
+                && root.service
+                && root.service.bridgeAlive === true
+              emphasized: true
+              label: "Open iPhone setup guide"
+              onTriggered: root.openWebhookSetup(true)
+            }
           }
         }
 
@@ -1577,8 +1624,11 @@ Item {
               anchors.verticalCenter: parent.verticalCenter
               width: Style.space(76)
               implicitHeight: root.titleHeight
-              label: "← Back"
-              onTriggered: root.closeWebhookSetup()
+              label: root.webhookGuideOpen ? "← Connection" : "← Back"
+              onTriggered: {
+                if (root.webhookGuideOpen) root.showWebhookConnection()
+                else root.closeWebhookSetup()
+              }
             }
 
             Text {
@@ -1586,7 +1636,7 @@ Item {
               anchors.leftMargin: Style.spacing.md
               anchors.right: parent.right
               anchors.verticalCenter: parent.verticalCenter
-              text: "Phone webhook"
+              text: root.webhookGuideOpen ? "iPhone setup guide" : "Phone webhook"
               textFormat: Text.PlainText
               color: root.foreground
               font.family: root.fontFamily
@@ -1609,9 +1659,21 @@ Item {
               width: webhookSetupFlickable.width
               spacing: Style.spacing.md
 
+              SetupButton {
+                id: openWebhookGuideButton
+                objectName: "openWebhookGuideButton"
+                width: parent.width
+                visible: !root.webhookGuideOpen
+                emphasized: root.webhookState().configured === true
+                label: "Open iPhone setup guide →"
+                onTriggered: root.showWebhookGuide()
+              }
+
               Rectangle {
+                objectName: "webhookConnectionStatus"
                 width: parent.width
                 height: webhookStatusContent.implicitHeight + Style.spacing.md * 2
+                visible: !root.webhookGuideOpen
                 radius: root.cornerRadius
                 color: Util.alpha(root.foreground, 0.055)
                 border.width: Style.normalBorderWidth
@@ -1675,7 +1737,8 @@ Item {
                 id: configureWebhookButton
                 objectName: "configureWebhookButton"
                 width: parent.width
-                visible: root.webhookState().configured !== true
+                visible: !root.webhookGuideOpen
+                  && root.webhookState().configured !== true
                 enabled: !root.webhookBusy
                   && root.webhookState().tailscale_available === true
                   && root.service
@@ -1690,7 +1753,8 @@ Item {
               Row {
                 width: parent.width
                 spacing: Style.spacing.sm
-                visible: root.webhookState().configured === true
+                visible: !root.webhookGuideOpen
+                  && root.webhookState().configured === true
 
                 SetupButton {
                   id: copyEndpointButton
@@ -1721,7 +1785,8 @@ Item {
               Row {
                 width: parent.width
                 spacing: Style.spacing.sm
-                visible: root.webhookState().configured === true
+                visible: !root.webhookGuideOpen
+                  && root.webhookState().configured === true
 
                 SetupButton {
                   id: webhookEnabledButton
@@ -1772,8 +1837,12 @@ Item {
               }
 
               Rectangle {
+                id: webhookGuidePanel
+                objectName: "webhookGuidePanel"
                 width: parent.width
-                height: phoneSetupGuide.implicitHeight + Style.spacing.md * 2
+                height: visible
+                  ? phoneSetupGuide.implicitHeight + Style.spacing.md * 2 : 0
+                visible: root.webhookGuideOpen
                 radius: root.cornerRadius
                 color: Util.alpha(root.foreground, 0.035)
 
@@ -1806,6 +1875,14 @@ Item {
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.bodySmall
                     wrapMode: Text.WordWrap
+                  }
+
+                  GuideScreenshot {
+                    objectName: "shortcutAutomationGuideImage"
+                    width: parent.width
+                    caption: "What you are building: a Message trigger that runs Send to Oma2FA immediately."
+                    imageSource: Qt.resolvedUrl("assets/shortcut-automation.png")
+                    aspectRatio: 1695 / 928
                   }
 
                   Text {
@@ -2032,14 +2109,6 @@ Item {
                     fieldId: "run_mode"
                     fieldLabel: "Run mode"
                     fieldValue: "Run Immediately"
-                  }
-
-                  GuideScreenshot {
-                    objectName: "shortcutAutomationGuideImage"
-                    width: parent.width
-                    caption: "The Automation tab should show the Message trigger pointing to Send to Oma2FA."
-                    imageSource: Qt.resolvedUrl("assets/shortcut-automation.png")
-                    aspectRatio: 1695 / 928
                   }
 
                   Text {

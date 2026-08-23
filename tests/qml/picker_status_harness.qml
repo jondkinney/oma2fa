@@ -208,6 +208,8 @@ ShellRoot {
       "collapsed transport trigger has the wrong accessible description")
     harness.expect(popover.visible === false,
       "transport popover should start hidden")
+    harness.expect(harness.named("emptyStateSetupButton").visible === true,
+      "empty state must expose the iPhone setup guide directly")
 
     picker.transportDetailsPinned = true
     harness.expect(popover.visible === true,
@@ -251,6 +253,12 @@ ShellRoot {
       "webhook setup did not refresh manager status")
     harness.expect(harness.named("configureWebhookButton").enabled === true,
       "Tailscale setup action should be enabled when Tailscale is detected")
+    harness.expect(picker.webhookGuideOpen === false,
+      "unconfigured webhook should open on connection setup")
+    harness.expect(harness.named("openWebhookGuideButton").visible === true,
+      "connection setup must visibly link to the iPhone guide")
+    harness.expect(harness.named("webhookGuidePanel").visible === false,
+      "guide should not obscure initial connection provisioning")
     harness.expect(JSON.stringify(fakeService.webhookSetup).indexOf("PRIVATE_TOKEN") === -1,
       "webhook setup state retained a bearer token")
     harness.expect(String(harness.named("copyShortcutFieldValue-shortcut_name").text)
@@ -278,10 +286,18 @@ ShellRoot {
       "webhook setup action did not call the service")
     harness.expect(picker.webhookStatusLabel() === "Ready",
       "configured webhook did not render as ready")
-    harness.expect(harness.named("copyWebhookEndpointButton").visible === true,
-      "configured webhook did not reveal its copy actions")
-    harness.expect(harness.named("copyWebhookTokenButton").Accessible.focusable === true,
-      "token copy action must be keyboard accessible")
+    harness.expect(picker.webhookGuideOpen === true,
+      "successful provisioning did not open the iPhone setup guide")
+    harness.expect(harness.named("webhookGuidePanel").visible === true,
+      "iPhone setup guide is not visible")
+    harness.expect(harness.named("webhookConnectionStatus").visible === false,
+      "connection controls should not bury the guide")
+    harness.expect(harness.named("shortcutAutomationGuideImage-content").status
+      === Image.Ready, "Automation guide screenshot did not load")
+    harness.expect(harness.named("shortcutLibraryGuideImage-content").status
+      === Image.Ready, "Library guide screenshot did not load")
+    harness.expect(harness.named("shortcutConfigurationGuideImage-content").status
+      === Image.Ready, "configuration guide screenshot did not load")
     harness.expect(harness.named("copyShortcutFieldButton-webhook_url").enabled === true,
       "configured webhook did not enable URL field copying")
     harness.expect(String(harness.named("copyShortcutFieldValue-authorization_value").text)
@@ -296,6 +312,16 @@ ShellRoot {
     harness.expect(JSON.stringify(fakeService.webhookSetup).indexOf("PRIVATE_TOKEN") === -1,
       "authorization value copy exposed a bearer token to QML")
 
+    harness.named("webhookBackButton").triggered()
+    harness.expect(picker.webhookSetupOpen === true,
+      "Connection back action unexpectedly closed setup")
+    harness.expect(picker.webhookGuideOpen === false,
+      "Connection back action did not reveal webhook controls")
+    harness.expect(harness.named("copyWebhookEndpointButton").visible === true,
+      "configured webhook did not reveal its copy actions")
+    harness.expect(harness.named("copyWebhookTokenButton").Accessible.focusable === true,
+      "token copy action must be keyboard accessible")
+
     harness.named("copyWebhookTokenButton").triggered()
     harness.expect(fakeService.tokenCopyRequests === 1,
       "token copy action did not call the service")
@@ -305,6 +331,15 @@ ShellRoot {
     harness.named("webhookBackButton").triggered()
     harness.expect(picker.webhookSetupOpen === false,
       "Back did not close the webhook manager")
+
+    harness.named("emptyStateSetupButton").triggered()
+    harness.expect(picker.webhookSetupOpen === true
+      && picker.webhookGuideOpen === true,
+      "empty-state setup button did not open the visible iPhone guide")
+    harness.expect(harness.named("webhookGuidePanel").visible === true,
+      "empty-state setup route did not show the guide panel")
+    picker.closeWebhookSetup()
+
     picker.transportDetailsPinned = true
     picker.close()
     harness.expect(picker.transportDetailsPinned === false,
