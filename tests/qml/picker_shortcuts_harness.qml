@@ -263,6 +263,21 @@ ShellRoot {
     harness.expect(harness.picker.selectedIndex === 1,
       "second Down should select the next result")
 
+    harness.pickerKey(Qt.Key_Up, "")
+    harness.expectListMode("Up from the second result")
+    harness.expect(harness.picker.selectedIndex === 0,
+      "Up from the second result should select the latest result")
+
+    harness.pickerKey(Qt.Key_Up, "")
+    harness.expectSearchMode("Up from the latest result")
+    harness.expect(harness.picker.selectedIndex === 0,
+      "returning to search should retain the latest result as latent index zero")
+
+    harness.pickerKey(Qt.Key_Down, "")
+    harness.expectListMode("Down after returning to search")
+    harness.expect(harness.picker.selectedIndex === 0,
+      "Down after returning to search should reselect the latest result")
+
     harness.pickerKey(Qt.Key_E, "e")
     harness.expect(harness.picker.filterText === "e",
       "typing from the list did not update the search filter")

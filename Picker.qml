@@ -432,6 +432,11 @@ Item {
   function select(delta) {
     if (displayModel.count === 0) return
     root.disarmPointer()
+    if (root.cursorActive && delta === -1 && root.selectedIndex === 0) {
+      root.cursorActive = false
+      resultList.positionViewAtIndex(0, ListView.Contain)
+      return
+    }
     if (!root.cursorActive) {
       root.cursorActive = true
       root.selectedIndex = delta < 0 ? displayModel.count - 1 : 0
