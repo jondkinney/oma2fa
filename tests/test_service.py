@@ -18,10 +18,12 @@ class ServiceTests(unittest.TestCase):
             clock=self.clock,
         )
         self.changes = 0
+        self.notifications = 0
         self.service = Oma2FAService(
             self.store,
             clock=self.clock,
             on_change=self.changed,
+            on_code=self.notified,
         )
 
     def tearDown(self) -> None:
@@ -29,6 +31,9 @@ class ServiceTests(unittest.TestCase):
 
     def changed(self) -> None:
         self.changes += 1
+
+    def notified(self) -> None:
+        self.notifications += 1
 
     def test_generic_ingest_accepts_and_never_persists_raw_message(self) -> None:
         body = "Private fixture prose. Your verification code is 123456."
@@ -40,6 +45,7 @@ class ServiceTests(unittest.TestCase):
         )
         self.assertTrue(result.accepted)
         self.assertEqual(self.changes, 1)
+        self.assertEqual(self.notifications, 1)
         state_text = self.store.path.read_text()
         self.assertNotIn("Private fixture prose", state_text)
         self.assertNotIn("message-one", state_text)
@@ -58,6 +64,7 @@ class ServiceTests(unittest.TestCase):
         )
         self.assertEqual(first.reason, "no_code")
         self.assertEqual(second.reason, "duplicate")
+        self.assertEqual(self.notifications, 0)
 
     def test_old_message_is_not_classified_or_stored(self) -> None:
         result = self.service.ingest(
@@ -68,6 +75,7 @@ class ServiceTests(unittest.TestCase):
         )
         self.assertEqual(result.reason, "expired")
         self.assertEqual(self.store.list(), [])
+        self.assertEqual(self.notifications, 0)
 
     def test_far_future_timestamp_is_clamped(self) -> None:
         result = self.service.ingest(

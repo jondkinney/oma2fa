@@ -16,6 +16,11 @@ from oma2fa.cli import main
 
 
 class CliTests(unittest.TestCase):
+    def setUp(self) -> None:
+        notifier = patch("oma2fa.cli.NewCodeNotifier.notify")
+        self.notify = notifier.start()
+        self.addCleanup(notifier.stop)
+
     def test_ingest_reads_body_only_from_stdin_then_list_reports_record(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             runtime = Path(temporary) / "runtime"
@@ -37,6 +42,7 @@ class CliTests(unittest.TestCase):
                 )
             self.assertEqual(status, 0)
             self.assertTrue(json.loads(output.getvalue())["accepted"])
+            self.notify.assert_called_once_with()
 
             output = io.StringIO()
             with patch("sys.stdout", output):

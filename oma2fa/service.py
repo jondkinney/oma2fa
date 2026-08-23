@@ -45,10 +45,12 @@ class Oma2FAService:
         *,
         clock: Callable[[], float] = time.time,
         on_change: Callable[[], None] | None = None,
+        on_code: Callable[[], None] | None = None,
     ) -> None:
         self.store = store
         self._clock = clock
         self._on_change = on_change
+        self._on_code = on_code
         self._status_lock = threading.Lock()
         self._sources: dict[str, dict[str, Any]] = {
             "manual": {"available": True, "detail": "ready"}
@@ -163,6 +165,8 @@ class Oma2FAService:
             return IngestResult(False, "not_stored")
         if self._on_change is not None:
             self._on_change()
+        if self._on_code is not None:
+            self._on_code()
         return IngestResult(True, "accepted", outcome.record)
 
     def ingest_blueferry_threads(self, threads: object) -> dict[str, int]:

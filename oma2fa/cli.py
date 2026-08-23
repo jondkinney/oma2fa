@@ -8,6 +8,7 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from .bridge import JsonBridge
+from .notification import NewCodeNotifier
 from .service import MAX_BODY_CHARS, Oma2FAService
 from .store import RuntimeStore, StoreError
 from .webhook import WebhookConfig, WebhookConfigError, WebhookServer
@@ -88,7 +89,8 @@ def _read_body() -> str:
 
 def _run(args: argparse.Namespace) -> int:
     store = RuntimeStore(args.runtime_dir)
-    service = Oma2FAService(store)
+    notifier = NewCodeNotifier()
+    service = Oma2FAService(store, on_code=notifier.notify)
 
     if args.command == "bridge":
         config = _webhook_config(args, standalone=False)
