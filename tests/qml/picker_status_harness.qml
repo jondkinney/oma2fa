@@ -349,6 +349,20 @@ ShellRoot {
       === Image.Ready, "shortcut input guide screenshot did not load")
     harness.expect(harness.named("shortcutConfigurationGuideImage-content").status
       === Image.Ready, "configuration guide screenshot did not load")
+    var screenshotFrames = [
+      harness.named("shortcutLibraryGuideImage-frame"),
+      harness.named("shortcutInputGuideImage-frame"),
+      harness.named("shortcutConfigurationGuideImage-frame"),
+      harness.named("shortcutAutomationGuideImage-frame")
+    ]
+    var screenshotWidth = screenshotFrames[0].width
+    harness.expect(Math.abs(screenshotWidth - picker.guideScreenshotWidth) <= 0.5,
+      "guide screenshots should use the narrower shared width")
+    for (var frameIndex = 1; frameIndex < screenshotFrames.length; frameIndex++) {
+      harness.expect(Math.abs(screenshotFrames[frameIndex].width
+        - screenshotWidth) <= 0.5,
+        "all guide screenshots should render at the same width")
+    }
     var guidePanel = harness.named("webhookGuidePanel")
     var libraryImageY = harness.named("shortcutLibraryGuideImage")
       .mapToItem(guidePanel, 0, 0).y

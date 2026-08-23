@@ -45,6 +45,7 @@ Item {
   readonly property int guideHeadingFontSize: Style.font.heading
   readonly property int guideTitleFontSize: Style.font.display
   readonly property int guideParagraphSpacing: Style.spacing.xxl
+  readonly property int guideScreenshotWidth: Style.space(364)
   property int contentMargin: Style.spacing.panelPadding
   property int contentSpacing: Style.spacing.md
   property int cardWidth: Math.min(Style.space(620), panel.width - Style.gapsOut * 2)
@@ -927,13 +928,14 @@ Item {
     required property string caption
     required property url imageSource
     required property real aspectRatio
-    property real maxImageWidth: Style.space(560)
+    property real maxImageWidth: root.guideScreenshotWidth
 
     spacing: Style.spacing.lg
 
     Text {
       objectName: guideScreenshot.objectName + "-caption"
-      width: parent.width
+      anchors.horizontalCenter: parent.horizontalCenter
+      width: Math.min(parent.width, guideScreenshot.maxImageWidth)
       text: guideScreenshot.caption
       textFormat: Text.PlainText
       color: root.foreground
@@ -951,6 +953,7 @@ Item {
 
       Rectangle {
         id: guideImageFrame
+        objectName: guideScreenshot.objectName + "-frame"
         anchors.horizontalCenter: parent.horizontalCenter
         width: Math.min(parent.width, guideScreenshot.maxImageWidth)
         height: width / Math.max(0.01, guideScreenshot.aspectRatio)
@@ -2108,7 +2111,6 @@ Item {
                     caption: "The complete shortcut configuration. The documentation image uses placeholders; the copyable URL and authorization rows use this computer's actual values."
                     imageSource: Qt.resolvedUrl("assets/shortcut-configuration.png")
                     aspectRatio: 853 / 1844
-                    maxImageWidth: Style.space(430)
                   }
 
                   GuideSectionHeading {

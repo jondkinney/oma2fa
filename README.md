@@ -86,14 +86,14 @@ LocalSend, KDE Connect, or another local transfer tool.
    `Send to Oma2FA`.
 
 <p align="center">
-  <img src="assets/shortcut-library.png" width="760" alt="Shortcuts Library showing the plus button and the pink Send to Oma2FA shortcut card">
+  <img src="assets/shortcut-library.png" width="500" alt="Shortcuts Library showing the plus button and the pink Send to Oma2FA shortcut card">
 </p>
 
 2. Configure its input block as **Receive Text from Nowhere**. For no input,
    choose **Stop and Respond**.
 
 <p align="center">
-  <img src="assets/shortcut-input.png" width="600" alt="Top of the Send to Oma2FA shortcut showing Receive Text from Nowhere and Stop and Respond">
+  <img src="assets/shortcut-input.png" width="500" alt="Top of the Send to Oma2FA shortcut showing Receive Text from Nowhere and Stop and Respond">
 </p>
 
 3. Add **Get Contents of URL**. Paste the value from the walkthrough's **URL**
@@ -127,7 +127,7 @@ credential are deliberately replaced with placeholders; use the values copied
 from your own Oma2FA installation.
 
 <p align="center">
-  <img src="assets/shortcut-configuration.png" width="430" alt="Send to Oma2FA shortcut configured to POST JSON with Authorization and Content-Type headers">
+  <img src="assets/shortcut-configuration.png" width="500" alt="Send to Oma2FA shortcut configured to POST JSON with Authorization and Content-Type headers">
 </p>
 
 6. Save the shortcut and confirm that its pink **Send to Oma2FA** card appears
@@ -146,7 +146,7 @@ from your own Oma2FA installation.
    phone. The Automation tab should look like this:
 
 <p align="center">
-  <img src="assets/shortcut-automation.png" width="760" alt="Shortcuts Automation tab showing a Message containing code running Send to Oma2FA">
+  <img src="assets/shortcut-automation.png" width="500" alt="Shortcuts Automation tab showing a Message containing code running Send to Oma2FA">
 </p>
 
 All copied setup values use a sensitive desktop clipboard offer that expires
