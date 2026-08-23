@@ -39,6 +39,12 @@ Item {
   property color selectedText: Color.menu.selectedText
   readonly property int cornerRadius: Style.cornerRadius
   property string fontFamily: Style.font.menuFamily
+  readonly property string guideFontFamily: "sans-serif"
+  readonly property int guideBodyFontSize: Style.font.subtitle
+  readonly property int guideCaptionFontSize: Style.font.body
+  readonly property int guideHeadingFontSize: Style.font.heading
+  readonly property int guideTitleFontSize: Style.font.display
+  readonly property int guideParagraphSpacing: Style.spacing.xxl
   property int contentMargin: Style.spacing.panelPadding
   property int contentSpacing: Style.spacing.md
   property int cardWidth: Math.min(Style.space(620), panel.width - Style.gapsOut * 2)
@@ -777,6 +783,8 @@ Item {
 
     required property string label
     property bool emphasized: false
+    property string fontFamily: root.fontFamily
+    property int fontSize: Style.font.bodySmall
     signal triggered()
 
     implicitHeight: Math.max(Style.space(38), Style.spacing.controlHeight)
@@ -801,8 +809,8 @@ Item {
       text: setupButton.label
       textFormat: Text.PlainText
       color: setupButton.emphasized ? root.selectedText : root.foreground
-      font.family: root.fontFamily
-      font.pixelSize: Style.font.bodySmall
+      font.family: setupButton.fontFamily
+      font.pixelSize: setupButton.fontSize
       font.weight: Font.DemiBold
     }
 
@@ -835,7 +843,7 @@ Item {
     property bool requiresWebhook: false
 
     implicitHeight: Math.max(copyFieldText.implicitHeight,
-      copyField.copyable ? copyFieldButton.implicitHeight : 0) + Style.spacing.sm * 2
+      copyField.copyable ? copyFieldButton.implicitHeight : 0) + Style.spacing.lg * 2
     radius: root.cornerRadius
     color: Util.alpha(root.foreground, 0.045)
     border.width: Math.max(1, Style.normalBorderWidth)
@@ -848,16 +856,17 @@ Item {
       anchors.leftMargin: Style.spacing.md
       anchors.rightMargin: Style.spacing.md
       anchors.verticalCenter: parent.verticalCenter
-      spacing: Style.spacing.xs
+      spacing: Style.spacing.md
 
       Text {
+        objectName: "copyShortcutFieldLabel-" + copyField.fieldId
         width: parent.width
         text: copyField.fieldLabel
         textFormat: Text.PlainText
         color: root.foreground
-        opacity: 0.52
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
+        opacity: 0.68
+        font.family: root.guideFontFamily
+        font.pixelSize: Style.font.bodySmall
         font.weight: Font.DemiBold
         wrapMode: Text.WordWrap
       }
@@ -868,9 +877,9 @@ Item {
         text: copyField.fieldValue
         textFormat: Text.PlainText
         color: root.foreground
-        opacity: 0.90
+        opacity: 0.94
         font.family: root.fontFamily
-        font.pixelSize: Style.font.bodySmall
+        font.pixelSize: Style.font.body
         font.weight: Font.Medium
         wrapMode: Text.WrapAnywhere
       }
@@ -881,9 +890,11 @@ Item {
         text: copyField.note
         textFormat: Text.PlainText
         color: root.foreground
-        opacity: 0.48
-        font.family: root.fontFamily
-        font.pixelSize: Style.font.caption
+        opacity: 0.62
+        font.family: root.guideFontFamily
+        font.pixelSize: Style.font.bodySmall
+        lineHeightMode: Text.ProportionalHeight
+        lineHeight: 1.25
         wrapMode: Text.WordWrap
       }
     }
@@ -895,6 +906,8 @@ Item {
       anchors.rightMargin: Style.spacing.sm
       anchors.verticalCenter: parent.verticalCenter
       width: Style.space(68)
+      fontFamily: root.guideFontFamily
+      fontSize: Style.font.bodySmall
       visible: copyField.copyable
       enabled: copyField.copyable
         && !root.webhookBusy
@@ -916,16 +929,19 @@ Item {
     required property real aspectRatio
     property real maxImageWidth: Style.space(560)
 
-    spacing: Style.spacing.sm
+    spacing: Style.spacing.lg
 
     Text {
+      objectName: guideScreenshot.objectName + "-caption"
       width: parent.width
       text: guideScreenshot.caption
       textFormat: Text.PlainText
       color: root.foreground
-      opacity: 0.58
-      font.family: root.fontFamily
-      font.pixelSize: Style.font.caption
+      opacity: 0.68
+      font.family: root.guideFontFamily
+      font.pixelSize: root.guideCaptionFontSize
+      lineHeightMode: Text.ProportionalHeight
+      lineHeight: 1.30
       wrapMode: Text.WordWrap
     }
 
@@ -955,6 +971,29 @@ Item {
         }
       }
     }
+  }
+
+  component GuideBodyText: Text {
+    textFormat: Text.PlainText
+    color: root.foreground
+    opacity: 0.74
+    font.family: root.guideFontFamily
+    font.pixelSize: root.guideBodyFontSize
+    lineHeightMode: Text.ProportionalHeight
+    lineHeight: 1.35
+    wrapMode: Text.WordWrap
+  }
+
+  component GuideSectionHeading: Text {
+    topPadding: Style.spacing.huge
+    bottomPadding: Style.spacing.sm
+    textFormat: Text.PlainText
+    color: root.foreground
+    opacity: 0.96
+    font.family: root.guideFontFamily
+    font.pixelSize: root.guideHeadingFontSize
+    font.weight: Font.DemiBold
+    wrapMode: Text.WordWrap
   }
 
   PanelWindow {
@@ -1634,6 +1673,8 @@ Item {
               anchors.verticalCenter: parent.verticalCenter
               width: root.webhookGuideOpen ? Style.space(132) : Style.space(76)
               implicitHeight: root.titleHeight
+              fontFamily: root.webhookGuideOpen
+                ? root.guideFontFamily : root.fontFamily
               label: root.webhookGuideOpen ? "← Connection" : "← Back"
               onTriggered: {
                 if (root.webhookGuideOpen) root.showWebhookConnection()
@@ -1652,7 +1693,8 @@ Item {
               text: root.webhookGuideOpen ? "iPhone setup guide" : "Phone webhook"
               textFormat: Text.PlainText
               color: root.foreground
-              font.family: root.fontFamily
+              font.family: root.webhookGuideOpen
+                ? root.guideFontFamily : root.fontFamily
               font.pixelSize: Style.font.heading
               font.weight: Font.DemiBold
               elide: Text.ElideRight
@@ -1665,6 +1707,7 @@ Item {
               anchors.verticalCenter: parent.verticalCenter
               width: Style.space(180)
               implicitHeight: root.titleHeight
+              fontFamily: root.guideFontFamily
               visible: !root.webhookGuideOpen
               emphasized: root.webhookState().configured === true
               label: "iPhone setup guide →"
@@ -1858,7 +1901,8 @@ Item {
                 objectName: "webhookGuidePanel"
                 width: parent.width
                 height: visible
-                  ? phoneSetupGuide.implicitHeight + Style.spacing.md * 2 : 0
+                  ? phoneSetupGuide.implicitHeight
+                    + Style.spacing.panelPadding * 2 : 0
                 visible: root.webhookGuideOpen
                 radius: root.cornerRadius
                 color: Util.alpha(root.foreground, 0.035)
@@ -1868,53 +1912,37 @@ Item {
                   anchors.left: parent.left
                   anchors.right: parent.right
                   anchors.top: parent.top
-                  anchors.margins: Style.spacing.md
-                  spacing: Style.spacing.sm
+                  anchors.margins: Style.spacing.panelPadding
+                  spacing: root.guideParagraphSpacing
 
                   Text {
+                    objectName: "webhookGuideTitle"
                     width: parent.width
-                    text: "IPHONE SHORTCUT WALKTHROUGH"
+                    text: "Set up your iPhone"
                     textFormat: Text.PlainText
                     color: root.foreground
-                    opacity: 0.82
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.bodySmall
+                    opacity: 0.98
+                    font.family: root.guideFontFamily
+                    font.pixelSize: root.guideTitleFontSize
                     font.weight: Font.DemiBold
                     wrapMode: Text.WordWrap
                   }
 
-                  Text {
+                  GuideBodyText {
+                    objectName: "webhookGuideIntro"
                     width: parent.width
-                    text: "Install Tailscale on the phone and join the same tailnet first. Values you need to type or paste have Copy buttons so you can send them to the phone with LocalSend, KDE Connect, or another local transfer tool. iOS menu choices remain visible as instructions."
-                    textFormat: Text.PlainText
-                    color: root.foreground
-                    opacity: 0.58
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.bodySmall
-                    wrapMode: Text.WordWrap
+                    text: "First, install Tailscale on your phone and join the same tailnet. Values you need to type or paste have Copy buttons, so you can send them to the phone with LocalSend, KDE Connect, or another local transfer tool. Choices made from iOS menus remain visible as instructions."
                   }
 
-                  Text {
+                  GuideSectionHeading {
+                    objectName: "webhookGuideStep1Heading"
                     width: parent.width
-                    topPadding: Style.spacing.sm
-                    text: "1 · CREATE THE SHORTCUT"
-                    textFormat: Text.PlainText
-                    color: root.foreground
-                    opacity: 0.78
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.bodySmall
-                    font.weight: Font.DemiBold
+                    text: "1. Create the Shortcut"
                   }
 
-                  Text {
+                  GuideBodyText {
                     width: parent.width
                     text: "In Shortcuts → Library, tap + and make a blank shortcut. Open its details, enable receiving input, and use the values below. Add a Get Contents of URL action after the input action."
-                    textFormat: Text.PlainText
-                    color: root.foreground
-                    opacity: 0.58
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.bodySmall
-                    wrapMode: Text.WordWrap
                   }
 
                   GuideScreenshot {
@@ -1964,28 +1992,15 @@ Item {
                     aspectRatio: 853 / 540
                   }
 
-                  Text {
+                  GuideSectionHeading {
+                    objectName: "webhookGuideStep2Heading"
                     width: parent.width
-                    topPadding: Style.spacing.sm
-                    text: "2 · CONFIGURE GET CONTENTS OF URL"
-                    textFormat: Text.PlainText
-                    color: root.foreground
-                    opacity: 0.78
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.bodySmall
-                    font.weight: Font.DemiBold
-                    wrapMode: Text.WordWrap
+                    text: "2. Configure Get Contents of URL"
                   }
 
-                  Text {
+                  GuideBodyText {
                     width: parent.width
                     text: "Expand Get Contents of URL. Paste the URL, choose POST, add both headers, select a JSON request body, and add the three key/value pairs in order."
-                    textFormat: Text.PlainText
-                    color: root.foreground
-                    opacity: 0.58
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.bodySmall
-                    wrapMode: Text.WordWrap
                   }
 
                   CopyFieldRow {
@@ -2096,28 +2111,15 @@ Item {
                     maxImageWidth: Style.space(430)
                   }
 
-                  Text {
+                  GuideSectionHeading {
+                    objectName: "webhookGuideStep3Heading"
                     width: parent.width
-                    topPadding: Style.spacing.sm
-                    text: "3 · CREATE THE MESSAGE AUTOMATION"
-                    textFormat: Text.PlainText
-                    color: root.foreground
-                    opacity: 0.78
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.bodySmall
-                    font.weight: Font.DemiBold
-                    wrapMode: Text.WordWrap
+                    text: "3. Create the Message Automation"
                   }
 
-                  Text {
+                  GuideBodyText {
                     width: parent.width
                     text: "Open Shortcuts → Automation, tap +, choose Message, and set Message Contains to the phrase below. Choose Run Immediately, continue, then select Send to Oma2FA. Add a sender filter only if you know every sender that delivers your codes."
-                    textFormat: Text.PlainText
-                    color: root.foreground
-                    opacity: 0.58
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.bodySmall
-                    wrapMode: Text.WordWrap
                   }
 
                   CopyFieldRow {
@@ -2143,16 +2145,10 @@ Item {
                     aspectRatio: 1695 / 928
                   }
 
-                  Text {
+                  GuideBodyText {
                     width: parent.width
                     topPadding: Style.spacing.sm
                     text: "Send a test message such as “Your verification code is 123456”. A generic notification should appear on the computer, and the code should appear in Oma2FA. Copied setup values use the same sensitive clipboard offer as codes and expire after about 60 seconds."
-                    textFormat: Text.PlainText
-                    color: root.foreground
-                    opacity: 0.58
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.bodySmall
-                    wrapMode: Text.WordWrap
                   }
                 }
               }

@@ -314,6 +314,33 @@ ShellRoot {
       "Connection back button is too narrow for its label")
     harness.expect(harness.named("webhookConnectionStatus").visible === false,
       "connection controls should not bury the guide")
+    var guideTitle = harness.named("webhookGuideTitle")
+    var guideIntro = harness.named("webhookGuideIntro")
+    var guideStep1 = harness.named("webhookGuideStep1Heading")
+    var guideFields = harness.named("copyShortcutFieldValue-shortcut_name")
+    var guideFieldLabel = harness.named("copyShortcutFieldLabel-shortcut_name")
+    harness.expect(String(guideTitle.font.family)
+      === String(picker.guideFontFamily),
+      "guide title should use the readable prose font")
+    harness.expect(guideTitle.font.pixelSize === picker.guideTitleFontSize,
+      "guide title should use the larger display size")
+    harness.expect(String(guideIntro.font.family)
+      === String(picker.guideFontFamily),
+      "guide prose should not inherit the terminal-style menu font")
+    harness.expect(guideIntro.font.pixelSize === picker.guideBodyFontSize,
+      "guide prose should use the larger body size")
+    harness.expect(guideIntro.lineHeight >= 1.3,
+      "guide prose needs comfortable line spacing")
+    harness.expect(guideStep1.font.pixelSize === picker.guideHeadingFontSize,
+      "guide sections should have a clear type hierarchy")
+    harness.expect(String(guideFieldLabel.font.family)
+      === String(picker.guideFontFamily),
+      "field labels should use the readable prose font")
+    harness.expect(String(guideFields.font.family) === String(picker.fontFamily),
+      "field values should remain monospaced")
+    harness.expect(harness.named("shortcutInputGuideImage-caption").font.pixelSize
+      === picker.guideCaptionFontSize,
+      "screenshot captions should be larger than terminal captions")
     harness.expect(harness.named("shortcutAutomationGuideImage-content").status
       === Image.Ready, "Automation guide screenshot did not load")
     harness.expect(harness.named("shortcutLibraryGuideImage-content").status
