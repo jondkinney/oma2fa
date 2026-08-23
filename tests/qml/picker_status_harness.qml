@@ -290,6 +290,17 @@ ShellRoot {
       "successful provisioning did not open the iPhone setup guide")
     harness.expect(harness.named("webhookGuidePanel").visible === true,
       "iPhone setup guide is not visible")
+    var guideCard = harness.named("pickerCard")
+    harness.expect(guideCard.width === picker.guideCardWidth,
+      "guide did not use its wider card width")
+    harness.expect(guideCard.height === picker.guideCardHeight,
+      "guide did not use its 90% viewport height")
+    harness.expect(guideCard.width > picker.cardWidth,
+      "guide card should be wider than the normal picker")
+    harness.expect(guideCard.height > picker.cardHeight,
+      "guide card should be taller than the normal picker")
+    harness.expect(harness.named("webhookBackButton").width >= 120,
+      "Connection back button is too narrow for its label")
     harness.expect(harness.named("webhookConnectionStatus").visible === false,
       "connection controls should not bury the guide")
     harness.expect(harness.named("shortcutAutomationGuideImage-content").status
@@ -317,6 +328,9 @@ ShellRoot {
       "Connection back action unexpectedly closed setup")
     harness.expect(picker.webhookGuideOpen === false,
       "Connection back action did not reveal webhook controls")
+    harness.expect(guideCard.width === picker.cardWidth
+      && guideCard.height === picker.cardHeight,
+      "connection page did not return to the normal picker size")
     harness.expect(harness.named("copyWebhookEndpointButton").visible === true,
       "configured webhook did not reveal its copy actions")
     harness.expect(harness.named("copyWebhookTokenButton").Accessible.focusable === true,

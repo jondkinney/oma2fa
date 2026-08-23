@@ -43,6 +43,10 @@ Item {
   property int contentSpacing: Style.spacing.md
   property int cardWidth: Math.min(Style.space(620), panel.width - Style.gapsOut * 2)
   property int cardHeight: Math.min(Style.space(560), panel.height - Style.gapsOut * 2)
+  readonly property int guideCardWidth: Math.min(Style.space(760),
+    Math.round(panel.width * 0.92), panel.width - Style.gapsOut * 2)
+  readonly property int guideCardHeight: Math.min(Math.round(panel.height * 0.90),
+    panel.height - Style.gapsOut * 2)
   property int titleHeight: Math.max(Style.space(30), Style.font.heading + Style.spacing.sm)
   property int searchHeight: Math.max(Style.space(42), Style.spacing.controlHeight)
   property int footerLineHeight: Math.max(Style.space(24),
@@ -972,8 +976,9 @@ Item {
 
     BorderSurface {
       id: card
-      width: root.cardWidth
-      height: root.cardHeight
+      objectName: "pickerCard"
+      width: root.webhookGuideOpen ? root.guideCardWidth : root.cardWidth
+      height: root.webhookGuideOpen ? root.guideCardHeight : root.cardHeight
       radius: root.cornerRadius
       anchors.centerIn: parent
       color: root.background
@@ -1622,7 +1627,7 @@ Item {
               objectName: "webhookBackButton"
               anchors.left: parent.left
               anchors.verticalCenter: parent.verticalCenter
-              width: Style.space(76)
+              width: root.webhookGuideOpen ? Style.space(132) : Style.space(76)
               implicitHeight: root.titleHeight
               label: root.webhookGuideOpen ? "← Connection" : "← Back"
               onTriggered: {
