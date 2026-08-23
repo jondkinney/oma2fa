@@ -5,18 +5,126 @@ It recognizes likely one-time codes in messages received locally, keeps only a
 minimal expiring record, and copies or pastes a code only after you select it.
 
 This is an alpha. The Omarchy picker, deterministic detector, runtime store,
-manual ingestion, and BlueFerry transport are the first supported path. It is
-not a replacement for passkeys, security keys, or authenticator apps; prefer
-those when a service offers them.
+BlueFerry adapter, and authenticated phone webhook are usable now. It is not a
+replacement for passkeys, security keys, or authenticator apps; prefer those
+when a service offers them.
 
 ![Oma2FA selecting a recent verification code beside a bank login](preview.png)
+
+## Quick start
+
+This path installs Oma2FA from GitHub and uses an authenticated iPhone
+Shortcut over Tailscale. BlueFerry users can install the plugin the same way
+and then skip to [BlueFerry for iPhone](#blueferry-for-iphone-available-now).
+
+### 1. Install the plugin
+
+You need a current Omarchy installation and Python 3.12 or newer. In a
+terminal, run:
+
+```bash
+omarchy plugin add https://github.com/jondkinney/oma2fa.git --enable
+```
+
+The plugin appears in the right side of the Omarchy bar. This Git-managed
+installation does not add a keyboard shortcut or start a network listener.
+Click the Oma2FA bar icon to open it. If the icon does not appear, run:
+
+```bash
+omarchy-shell shell rescanPlugins
+omarchy plugin list
+```
+
+### 2. Connect the computer and phone with Tailscale
+
+Install Tailscale on both devices, sign in to the same tailnet, and verify that
+both appear online. The computer must have a working `tailscale` command and
+`tailscale ip -4` must print its `100.x.y.z` address. See the official
+[Tailscale quickstart](https://tailscale.com/kb/1017/install/) if either device
+is not connected.
+
+Oma2FA deliberately does not expose its HTTP listener over ordinary Wi-Fi,
+Ethernet, port forwarding, or the public internet. The setup button is enabled
+only when it detects an active Tailscale IPv4 address.
+
+### 3. Let Oma2FA configure the computer
+
+1. Open Oma2FA from the bar.
+2. Click the transport summary in the upper-right corner.
+3. Choose **Manage phone webhook…**.
+4. Choose **Set up securely with Tailscale**.
+5. Wait for the status to read **Ready**.
+
+That one action creates a private bearer token, writes the webhook environment
+file, installs the hardened `oma2fa-webhook.service` user unit, reloads the
+user service manager, and enables and starts the listener. It does not need
+`sudo`. The manager can later copy the connection values, disable or re-enable
+the service, and rotate its token. Token rotation requires confirmation and
+the phone must be updated afterward.
+
+### 4. Create the iPhone automation
+
+Apple's [Message automation](https://support.apple.com/guide/shortcuts/apdd711f9dff/ios)
+can filter by sender or text, and Message automations can
+[run without asking](https://support.apple.com/guide/shortcuts/apd602971e63/ios).
+Names can vary slightly between iOS releases, but the resulting automation
+should be:
+
+1. In **Shortcuts → Automation**, add a personal automation using the
+   **Message** trigger.
+2. Restrict **Sender** and/or **Message Contains** when practical so unrelated
+   messages are not forwarded. Common filters include `code`, `verification`,
+   and `one-time`—use multiple automations if you need different phrases.
+3. Select **Run Immediately** (or disable **Ask Before Running**, depending on
+   the iOS version) and create a blank automation.
+4. Back in Oma2FA, choose **Copy webhook URL**. Add a **URL** action in the
+   automation and paste it.
+5. Add **Get Contents of URL**, expand its options, and select **POST**. Apple
+   documents this action in its
+   [Shortcuts API guide](https://support.apple.com/guide/shortcuts/apd58d46713f/ios).
+6. Add these headers:
+
+   | Header | Value |
+   | --- | --- |
+   | `Authorization` | `Bearer ` followed by the value from **Copy bearer token** |
+   | `Content-Type` | `application/json` |
+
+7. Set the request body type to **JSON** and add:
+
+   | Key | Value |
+   | --- | --- |
+   | `sender` | The sender variable if available, otherwise a fixed value such as `iPhone` |
+   | `body` | The incoming message/Shortcut Input variable |
+   | `source` | The fixed text `ios-shortcuts` |
+
+   `sender` and `body` are required. `timestamp` and `message_id` are optional;
+   omit them unless the automation has trustworthy values for them.
+8. Save the automation and confirm that Tailscale remains connected on the
+   phone. The copied URL and token expire from the desktop clipboard after
+   about 60 seconds, so copy them again if necessary.
+
+### 5. Verify receipt
+
+Trigger the automation with a test message containing an obvious phrase such
+as `Your verification code is 123456`. A generic desktop notification should
+appear, the bar icon should show a badge, and the code should appear in the
+picker. The notification intentionally contains no sender, service, message,
+or code.
+
+On the computer, these commands confirm the listener without printing its
+token:
+
+```bash
+systemctl --user status oma2fa-webhook.service
+journalctl --user -u oma2fa-webhook.service --since today
+```
 
 ## How it works
 
 ```text
 BlueFerry (Bluetooth MAP) ─┐
-Manual/test ingestion ─────┼─> local detector ─> short-lived runtime store
-Future phone adapters ─────┘                         │
+Phone webhook (VPN) ───────┼─> local detector ─> short-lived runtime store
+Manual/test ingestion ─────┘                         │
                                                      ▼
                                   Omarchy service + bar icon + picker
                                                      │
@@ -30,7 +138,8 @@ The Omarchy shell keeps `Service.qml` loaded and starts
 stdout; it is not a network service. `Picker.qml` displays the minimal records
 returned by that bridge. The UI/BlueFerry path needs no separate systemd unit,
 which avoids two bridge processes competing for the same transport. An
-optional unit later in this README runs only the standalone phone webhook.
+independent user unit, provisioned by the setup UI, runs only the standalone
+phone webhook so messages can arrive while the picker is closed.
 
 Code detection is deterministic and local. It scores 4–8 digit and supported
 alphanumeric candidates against phrases such as “verification code” and
@@ -87,6 +196,19 @@ mode by extracting the code on the phone and sending only the derived record.
 
 ### Authenticated phone webhook
 
+The recommended setup is available in the picker: open the transport summary,
+choose **Manage phone webhook…**, then choose **Set up securely with
+Tailscale**. Oma2FA detects the computer's active Tailscale IPv4 address,
+creates a random bearer token, installs and starts the hardened user service,
+and then offers separate buttons to copy the webhook URL and token. It can also
+enable or disable the listener and rotate its token. Rotation requires a second
+confirmation because the phone must be updated afterward.
+
+The setup UI deliberately supports only the direct Tailscale path. Connect the
+computer and phone to the same Tailscale network before opening it. Advanced
+loopback/HTTPS-proxy and other WireGuard configurations remain manual so the UI
+cannot accidentally assert that an arbitrary network interface is encrypted.
+
 The webhook inside the UI bridge is disabled unless
 `OMA2FA_WEBHOOK_ENABLED=1` is set or the bridge is started with `--webhook`.
 The standalone `oma2fa webhook` command enables only the listener. Its defaults
@@ -106,8 +228,17 @@ There are two supported remote-access patterns:
 The `vpn` setting is an explicit security assertion, not VPN detection. Set it
 only when the bind address belongs exclusively to an active encrypted tunnel.
 
-Configuration is environment-only so the secret never appears in process
-arguments:
+Configuration is file/environment-based so the secret never appears in process
+arguments or QML state. The setup UI manages these files:
+
+- `$XDG_CONFIG_HOME/oma2fa/webhook.env` (normally
+  `~/.config/oma2fa/webhook.env`) contains only the bind, port, transport, and
+  absolute token-file path.
+- `$XDG_CONFIG_HOME/oma2fa/webhook-token` is the mode-`0600` bearer-token file.
+- `$XDG_CONFIG_HOME/systemd/user/oma2fa-webhook.service` is the hardened user
+  unit copied from the plugin.
+
+The underlying variables are:
 
 | Variable | Meaning |
 | --- | --- |
@@ -151,10 +282,10 @@ receive time. Requests are capped at 16 KiB, unauthenticated requests and
 other methods/paths are rejected, and request bodies are not logged. Records
 appear as `webhook/<source>` in the picker.
 
-For stable receipt, the repository includes an optional hardened user unit.
-It runs the standalone webhook process, not another UI bridge. First create
-`~/.config/oma2fa/webhook.env` with an absolute token path and your chosen bind
-address:
+For advanced manual setup, the repository includes the same hardened user unit
+installed by the UI. It runs the standalone webhook process, not another UI
+bridge. First create `~/.config/oma2fa/webhook.env` with an absolute token path
+and your chosen bind address:
 
 ```ini
 OMA2FA_WEBHOOK_BIND=127.0.0.1
@@ -195,8 +326,10 @@ owner-only heartbeat so the picker can report it as an active transport. That
 heartbeat contains only a format version, timestamp, and random process-instance
 identifier; it contains no bind address, token, sender, message body, or code.
 Hover the transport count in the picker to preview each transport's derived
-health, or click it to keep the details open. Arbitrary backend detail is never
-rendered in that disclosure.
+health, or click it to keep the details open and enter the webhook manager.
+Arbitrary backend detail is never rendered in that disclosure. Token-copying
+happens entirely in the Python backend through an expiring sensitive clipboard
+offer; the token is never returned across the bridge.
 
 ## Requirements
 
@@ -204,6 +337,8 @@ rendered in that disclosure.
 - Python 3.12 or newer.
 - `jq`, `hyprctl`, `wl-copy`, `wtype`, and coreutils `timeout` (normally
   supplied by Omarchy).
+- Tailscale on the computer and phone when using the guided phone-webhook
+  setup. The computer's `tailscale ip -4` command must report an active address.
 - BlueFerry `v0.7.7` or newer and a paired iPhone for automatic local SMS
   ingestion. The backend package must provide both
   `/usr/bin/blueferry-quickshell-bridge` and the `blueferry.client` Python
@@ -273,11 +408,13 @@ service entry to the new bar entry.
 Click the Oma2FA bar icon or press `Super+Alt+V`. The badge is only a count of
 available codes; the bar never displays a code or message content. Search is
 active when the picker opens, while the newest matching code remains the
-default Enter action.
+default Enter action. When a new code is accepted, Oma2FA also shows a generic
+desktop notification; it contains no code, sender, service, or message text.
 
 - Type to filter by service, source, or code.
 - Press Down to enter the results at the newest code, or Up to enter at the
-  oldest; then use Up/Down, Page Up/Page Down, Home, or End to browse.
+  oldest; then use Up/Down, Page Up/Page Down, Home, or End to browse. Pressing
+  Up from the newest result returns to the search input.
 - Press Enter to copy and request a paste into the window that was focused
   before the picker opened.
 - Press Shift+Enter to copy only.
@@ -296,6 +433,22 @@ You can always open the picker without a keybinding:
 
 ```bash
 omarchy-shell shell toggle io.github.jondkinney.oma2fa '{}'
+```
+
+## Update
+
+Git-managed installations can be updated with:
+
+```bash
+omarchy plugin update io.github.jondkinney.oma2fa --yes
+```
+
+The Omarchy shell reloads the plugin code. If the standalone phone webhook is
+configured, restart that long-running process so it uses the updated Python
+code:
+
+```bash
+systemctl --user restart oma2fa-webhook.service
 ```
 
 ## CLI and manual ingestion
@@ -317,9 +470,10 @@ or epoch seconds. Global `--runtime-dir PATH`, when needed for an isolated
 test, must appear before the subcommand. The CLI's help remains the
 authoritative source for flags while the project is alpha.
 
-The UI-facing `bin/oma2fa-bridge` is not intended for interactive use. The QML
-client calls only status, refresh, activate, delete, and clear; its normal
-channel contains derived records, not original BlueFerry message bodies.
+The UI-facing `bin/oma2fa-bridge` is not intended for interactive use. Its
+normal channel contains derived records and allowlisted webhook status, not
+original BlueFerry message bodies or the webhook bearer token. Token-copy
+requests are completed inside the backend and return only success or failure.
 
 ## Security and privacy model
 
@@ -335,12 +489,79 @@ channel contains derived records, not original BlueFerry message bodies.
 - Automatic paste is conditional on matching the window captured before the
   picker opened. Copy-only remains available when that check is unavailable.
 - Codes and message bodies must never be written to application logs,
-  notifications, command-line arguments, or analytics.
+  notifications, command-line arguments, or analytics. New-code notifications
+  are intentionally generic.
 
 These controls reduce exposure; they cannot make the desktop clipboard a
 secret enclave. Other processes running as your user may be able to observe
 clipboard contents or inspect process memory. BlueFerry/MAP also grants the
 computer broader message access before Oma2FA performs its filtering.
+
+## Troubleshooting
+
+### The Tailscale setup button is disabled
+
+Confirm the Linux client is installed, authenticated, and online:
+
+```bash
+tailscale status
+tailscale ip -4
+```
+
+The second command must print a `100.x.y.z` address. Also confirm the phone is
+online in the same tailnet. Tailscale's
+[device-connectivity guide](https://tailscale.com/kb/1452/connect-to-devices/)
+covers ACL and reachability problems.
+
+### The picker says the webhook is disabled or not responding
+
+Open **Manage phone webhook…** and use **Enable webhook**, then inspect the
+unit if it does not become ready:
+
+```bash
+systemctl --user status oma2fa-webhook.service
+journalctl --user -u oma2fa-webhook.service -n 100 --no-pager
+```
+
+The service runs as the current user. Its configuration is normally at
+`~/.config/oma2fa/webhook.env`; its token is in the separate owner-only
+`~/.config/oma2fa/webhook-token` file. Do not paste either file into an issue.
+
+### The Shortcut reports unauthorized
+
+Copy the bearer token again and ensure the header is exactly
+`Authorization: Bearer <token>`, including the space after `Bearer`. If the
+token was rotated, every phone automation using the old value must be updated.
+
+### The service is ready but no code appears
+
+- Verify the Shortcut ran and that its Message trigger filters match.
+- Confirm `body` receives the incoming message rather than a literal label.
+- Use a clear test phrase with a 4–8 character candidate, such as
+  `Your verification code is 123456`.
+- Check that the phone's Tailscale connection is active when the message
+  arrives.
+- Remember that duplicates are intentionally ignored and codes expire after
+  ten minutes.
+
+### BlueFerry is disconnected or degraded
+
+Pair the iPhone in BlueFerry first and verify BlueFerry can receive current
+messages. Oma2FA requires both `/usr/bin/blueferry-quickshell-bridge` and the
+`blueferry.client` Python module. A degraded state means the receive-event path
+is unavailable, even if conversation history can still be read.
+
+### The bar widget or notification does not appear
+
+```bash
+omarchy-shell shell rescanPlugins
+omarchy plugin list
+omarchy restart shell
+```
+
+The bar badge and desktop toast are intentionally generic; open the picker to
+see the derived record. If the plugin is enabled but absent from the bar, use
+Omarchy's bar settings to place the Oma2FA widget in a visible section.
 
 ## Development and tests
 
@@ -384,6 +605,15 @@ If you installed the optional webhook unit, stop and remove it first:
 systemctl --user disable --now oma2fa-webhook.service
 rm ~/.config/systemd/user/oma2fa-webhook.service
 systemctl --user daemon-reload
+```
+
+The private environment and token files are intentionally preserved so an
+accidental plugin removal does not silently destroy credentials. After the
+service is stopped, remove them too if you want a complete cleanup:
+
+```bash
+rm ~/.config/oma2fa/webhook.env ~/.config/oma2fa/webhook-token
+rmdir ~/.config/oma2fa 2>/dev/null || true
 ```
 
 For a marketplace/Git installation, use Omarchy's native removal command:
