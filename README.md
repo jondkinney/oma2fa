@@ -57,11 +57,11 @@ only when it detects an active Tailscale IPv4 address.
 
 That one action creates a private bearer token, writes the webhook environment
 file, installs the hardened `oma2fa-webhook.service` user unit, reloads the
-user service manager, and enables and starts the listener. It does not need
-`sudo`. The manager can later copy the connection values, disable or re-enable
-the service, and rotate its token. Its built-in iPhone walkthrough provides a
-separate **Copy** action for each value that must be typed or pasted. Token
-rotation requires confirmation and the phone must be updated afterward.
+user service manager, and enables and starts the listener. No sudo or pkexec is
+required. The manager can later copy the connection values, disable or
+re-enable the service, and rotate its token. Its built-in iPhone walkthrough
+provides a separate **Copy** action for each value that must be typed or pasted.
+Token rotation requires confirmation and the phone must be updated afterward.
 
 After the webhook becomes ready, Oma2FA opens the **iPhone setup guide**
 automatically. You can also open it directly from the picker's empty state with
