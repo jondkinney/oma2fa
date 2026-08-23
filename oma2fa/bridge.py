@@ -307,6 +307,8 @@ class JsonBridge:
             return self.webhook_manager.copy_endpoint()
         if method == "webhook_copy_token":
             return self.webhook_manager.copy_token()
+        if method == "webhook_copy_setup_field":
+            return self.webhook_manager.copy_setup_field(_text(args, "field_id"))
         if method == "webhook_rotate_token":
             confirmed = args.get("confirmed", False)
             if confirmed is not True:

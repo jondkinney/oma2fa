@@ -253,6 +253,21 @@ ShellRoot {
       "Tailscale setup action should be enabled when Tailscale is detected")
     harness.expect(JSON.stringify(fakeService.webhookSetup).indexOf("PRIVATE_TOKEN") === -1,
       "webhook setup state retained a bearer token")
+    harness.expect(String(harness.named("copyShortcutFieldValue-shortcut_name").text)
+      === "Send to Oma2FA", "shortcut name field is missing")
+    harness.expect(harness.named("copyShortcutFieldButton-shortcut_name").enabled === true,
+      "static setup fields should be copyable before webhook provisioning")
+    harness.expect(harness.named("copyShortcutFieldButton-webhook_url").enabled === false,
+      "URL copy must wait until the webhook is provisioned")
+    harness.expect(String(harness.named("shortcutLibraryGuideImage").imageSource)
+      .indexOf("assets/shortcut-library.png") >= 0,
+      "Library reference image is missing")
+    harness.expect(String(harness.named("shortcutConfigurationGuideImage").imageSource)
+      .indexOf("assets/shortcut-configuration.png") >= 0,
+      "configuration reference image is missing")
+    harness.expect(String(harness.named("shortcutAutomationGuideImage").imageSource)
+      .indexOf("assets/shortcut-automation.png") >= 0,
+      "Automation reference image is missing")
 
     harness.named("configureWebhookButton").triggered()
     Qt.callLater(harness.runConfiguredWebhookAssertions)
@@ -267,6 +282,19 @@ ShellRoot {
       "configured webhook did not reveal its copy actions")
     harness.expect(harness.named("copyWebhookTokenButton").Accessible.focusable === true,
       "token copy action must be keyboard accessible")
+    harness.expect(harness.named("copyShortcutFieldButton-webhook_url").enabled === true,
+      "configured webhook did not enable URL field copying")
+    harness.expect(String(harness.named("copyShortcutFieldValue-authorization_value").text)
+      === "Bearer <generated token>",
+      "authorization field should display only a placeholder")
+
+    harness.named("copyShortcutFieldButton-authorization_value").triggered()
+    harness.expect(fakeService.fieldCopyRequests === 1,
+      "authorization value copy did not call the service")
+    harness.expect(fakeService.lastCopiedField === "authorization_value",
+      "authorization value copy used the wrong allowlisted field id")
+    harness.expect(JSON.stringify(fakeService.webhookSetup).indexOf("PRIVATE_TOKEN") === -1,
+      "authorization value copy exposed a bearer token to QML")
 
     harness.named("copyWebhookTokenButton").triggered()
     harness.expect(fakeService.tokenCopyRequests === 1,
@@ -297,6 +325,8 @@ ShellRoot {
     property int statusRequests: 0
     property int configureRequests: 0
     property int tokenCopyRequests: 0
+    property int fieldCopyRequests: 0
+    property string lastCopiedField: ""
     property var webhookSetup: ({
       configured: false,
       configuration_present: false,
@@ -347,6 +377,14 @@ ShellRoot {
       return 12
     }
     function copyWebhookEndpoint() { return 13 }
+    function copyWebhookSetupField(fieldId) {
+      fieldCopyRequests++
+      lastCopiedField = String(fieldId)
+      Qt.callLater(function() {
+        fakeService.requestFinished(16, "webhook_copy_setup_field", true, "")
+      })
+      return 16
+    }
     function setWebhookEnabled(enabled) { return 14 }
     function rotateWebhookToken() { return 15 }
 

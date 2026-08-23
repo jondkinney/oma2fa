@@ -93,14 +93,51 @@ class WebhookManagerTests(unittest.TestCase):
 
         endpoint_result = self.manager.copy_endpoint()
         token_result = self.manager.copy_token()
+        authorization_result = self.manager.copy_setup_field("authorization_value")
 
         self.assertEqual(endpoint_result, {"copied": True})
         self.assertEqual(token_result, {"copied": True})
+        self.assertEqual(authorization_result, {"copied": True})
         self.assertEqual(
             self.copied,
-            ["http://100.100.101.102:8765/v1/ingest", token],
+            [
+                "http://100.100.101.102:8765/v1/ingest",
+                token,
+                f"Bearer {token}",
+            ],
         )
-        self.assertNotIn(token, repr(endpoint_result) + repr(token_result))
+        self.assertNotIn(
+            token,
+            repr(endpoint_result) + repr(token_result) + repr(authorization_result),
+        )
+
+    def test_shortcut_setup_fields_are_individually_allowlisted(self) -> None:
+        expected = {
+            "shortcut_name": "Send to Oma2FA",
+            "trigger_phrase": "code",
+            "receive_type": "Text",
+            "receive_source": "Nowhere",
+            "no_input_behavior": "Stop and Respond",
+            "run_mode": "Run Immediately",
+            "http_method": "POST",
+            "authorization_header": "Authorization",
+            "content_type_header": "Content-Type",
+            "content_type_value": "application/json",
+            "request_body_type": "JSON",
+            "sender_key": "sender",
+            "sender_value": "SMS",
+            "body_key": "body",
+            "shortcut_input": "Shortcut Input",
+            "source_key": "source",
+            "source_value": "ios-shortcuts",
+        }
+        for field_id, value in expected.items():
+            with self.subTest(field_id=field_id):
+                self.assertEqual(self.manager.copy_setup_field(field_id), {"copied": True})
+                self.assertEqual(self.copied[-1], value)
+
+        with self.assertRaisesRegex(WebhookSetupError, "Unknown Shortcut setup field"):
+            self.manager.copy_setup_field("arbitrary-user-controlled-value")
 
     def test_enable_disable_and_rotation(self) -> None:
         self.manager.configure_tailscale()

@@ -260,6 +260,25 @@ class BridgeTests(unittest.TestCase):
         self.assertIn("snapshot", events)
         self.assertIn("status", events)
 
+    def test_shortcut_setup_field_copy_returns_only_confirmation(self) -> None:
+        self.bridge.handle_line(
+            '{"id":8,"method":"webhook_copy_setup_field",'
+            '"args":{"field_id":"content_type_value"}}\n'
+        )
+
+        response = self.lines()[-1]
+        self.assertTrue(response["ok"])
+        self.assertEqual(response["result"], {"copied": True})
+        self.assertEqual(self.activator.secrets, ["application/json"])
+        self.assertNotIn("application/json", self.output.getvalue())
+
+        self.bridge.handle_line(
+            '{"id":9,"method":"webhook_copy_setup_field",'
+            '"args":{"field_id":"not-allowlisted"}}\n'
+        )
+        self.assertFalse(self.lines()[-1]["ok"])
+        self.assertEqual(self.lines()[-1]["error"], "Unknown Shortcut setup field")
+
     def test_serve_uses_bounded_line_reads(self) -> None:
         source = TrackingInput("x" * (MAX_REQUEST_CHARS + 100) + "\n")
         self.bridge.serve(source)

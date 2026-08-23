@@ -264,6 +264,14 @@ Item {
     return root.sendRequest("webhook_copy_token", {})
   }
 
+  function copyWebhookSetupField(fieldId) {
+    if (fieldId === undefined || fieldId === null || String(fieldId) === "")
+      return -1
+    return root.sendRequest("webhook_copy_setup_field", {
+      field_id: String(fieldId)
+    })
+  }
+
   function rotateWebhookToken() {
     return root.sendRequest("webhook_rotate_token", { confirmed: true })
   }

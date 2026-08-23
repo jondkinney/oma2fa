@@ -447,7 +447,7 @@ done
 shopt -u nullglob
 [[ -f "$repo_root/qmldir" ]] && copy_root_file "$repo_root/qmldir" "$stage"
 
-for source_dir_name in oma2fa bin systemd docs ui; do
+for source_dir_name in oma2fa bin systemd docs ui assets; do
   [[ -d "$repo_root/$source_dir_name" ]] || continue
   copy_tree_without_links "$repo_root/$source_dir_name" "$stage/$source_dir_name"
 done

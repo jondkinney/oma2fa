@@ -612,17 +612,19 @@ Item {
         return
       }
       if (method === "webhook_configure_tailscale")
-        root.webhookNotice = "Webhook ready. Copy its URL and token to your phone."
+        root.webhookNotice = "Webhook ready. Follow the copyable iPhone steps below."
       else if (method === "webhook_copy_endpoint")
         root.webhookNotice = "Webhook URL copied for 60 seconds."
       else if (method === "webhook_copy_token")
-        root.webhookNotice = "Bearer token copied securely for 60 seconds."
+        root.webhookNotice = "Raw bearer token copied securely for 60 seconds."
+      else if (method === "webhook_copy_setup_field")
+        root.webhookNotice = "Shortcut field copied for 60 seconds."
       else if (method === "webhook_set_enabled")
         root.webhookNotice = root.webhookState().enabled
           ? "Phone webhook enabled." : "Phone webhook disabled."
       else if (method === "webhook_rotate_token") {
         root.tokenRotationArmed = false
-        root.webhookNotice = "Token rotated. Copy the new token to your phone."
+        root.webhookNotice = "Token rotated. Copy the new Header 1 value to your phone."
       } else if (method === "webhook_status") {
         root.webhookNotice = ""
       }
@@ -780,6 +782,135 @@ Item {
           || event.key === Qt.Key_Space) {
         if (setupButton.enabled) setupButton.triggered()
         event.accepted = true
+      }
+    }
+  }
+
+  component CopyFieldRow: Rectangle {
+    id: copyField
+
+    required property string fieldId
+    required property string fieldLabel
+    required property string fieldValue
+    property string note: ""
+    property bool requiresWebhook: false
+
+    implicitHeight: Math.max(copyFieldText.implicitHeight,
+      copyFieldButton.implicitHeight) + Style.spacing.sm * 2
+    radius: root.cornerRadius
+    color: Util.alpha(root.foreground, 0.045)
+    border.width: Math.max(1, Style.normalBorderWidth)
+    border.color: Util.alpha(root.border, 0.28)
+
+    Column {
+      id: copyFieldText
+      anchors.left: parent.left
+      anchors.right: copyFieldButton.left
+      anchors.leftMargin: Style.spacing.md
+      anchors.rightMargin: Style.spacing.md
+      anchors.verticalCenter: parent.verticalCenter
+      spacing: Style.spacing.xs
+
+      Text {
+        width: parent.width
+        text: copyField.fieldLabel
+        textFormat: Text.PlainText
+        color: root.foreground
+        opacity: 0.52
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        font.weight: Font.DemiBold
+        wrapMode: Text.WordWrap
+      }
+
+      Text {
+        objectName: "copyShortcutFieldValue-" + copyField.fieldId
+        width: parent.width
+        text: copyField.fieldValue
+        textFormat: Text.PlainText
+        color: root.foreground
+        opacity: 0.90
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.bodySmall
+        font.weight: Font.Medium
+        wrapMode: Text.WrapAnywhere
+      }
+
+      Text {
+        width: parent.width
+        visible: copyField.note.length > 0
+        text: copyField.note
+        textFormat: Text.PlainText
+        color: root.foreground
+        opacity: 0.48
+        font.family: root.fontFamily
+        font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+      }
+    }
+
+    SetupButton {
+      id: copyFieldButton
+      objectName: "copyShortcutFieldButton-" + copyField.fieldId
+      anchors.right: parent.right
+      anchors.rightMargin: Style.spacing.sm
+      anchors.verticalCenter: parent.verticalCenter
+      width: Style.space(68)
+      enabled: !root.webhookBusy
+        && root.service
+        && typeof root.service.copyWebhookSetupField === "function"
+        && (!copyField.requiresWebhook
+          || root.webhookState().configured === true)
+      label: "Copy"
+      onTriggered: root.beginWebhookRequest(
+        root.service.copyWebhookSetupField(copyField.fieldId))
+    }
+  }
+
+  component GuideScreenshot: Column {
+    id: guideScreenshot
+
+    required property string caption
+    required property url imageSource
+    required property real aspectRatio
+    property real maxImageWidth: Style.space(560)
+
+    spacing: Style.spacing.sm
+
+    Text {
+      width: parent.width
+      text: guideScreenshot.caption
+      textFormat: Text.PlainText
+      color: root.foreground
+      opacity: 0.58
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.caption
+      wrapMode: Text.WordWrap
+    }
+
+    Item {
+      width: parent.width
+      height: guideImageFrame.height
+
+      Rectangle {
+        id: guideImageFrame
+        anchors.horizontalCenter: parent.horizontalCenter
+        width: Math.min(parent.width, guideScreenshot.maxImageWidth)
+        height: width / Math.max(0.01, guideScreenshot.aspectRatio)
+        radius: root.cornerRadius
+        color: "black"
+        border.width: Math.max(1, Style.normalBorderWidth)
+        border.color: Util.alpha(root.border, 0.40)
+        clip: true
+
+        Image {
+          anchors.fill: parent
+          source: guideScreenshot.imageSource
+          fillMode: Image.PreserveAspectFit
+          asynchronous: true
+          cache: true
+          smooth: true
+        }
       }
     }
   }
@@ -1580,7 +1711,7 @@ Item {
                   width: (parent.width - parent.spacing) / 2
                   enabled: !root.webhookBusy && root.service
                     && typeof root.service.copyWebhookToken === "function"
-                  label: "Copy bearer token"
+                  label: "Copy raw token"
                   onTriggered: {
                     root.beginWebhookRequest(root.service.copyWebhookToken())
                   }
@@ -1642,23 +1773,286 @@ Item {
 
               Rectangle {
                 width: parent.width
-                height: phoneSetupSteps.implicitHeight + Style.spacing.md * 2
+                height: phoneSetupGuide.implicitHeight + Style.spacing.md * 2
                 radius: root.cornerRadius
                 color: Util.alpha(root.foreground, 0.035)
 
-                Text {
-                  id: phoneSetupSteps
+                Column {
+                  id: phoneSetupGuide
                   anchors.left: parent.left
                   anchors.right: parent.right
                   anchors.top: parent.top
                   anchors.margins: Style.spacing.md
-                  text: "SET UP THE PHONE\n\n1. Install Tailscale on the phone and join the same network.\n2. In Shortcuts, create a Message automation that runs immediately.\n3. Add Get Contents of URL: POST JSON to the copied URL.\n4. Add Authorization: Bearer <copied token>. Send sender, body, and source fields.\n\nThe URL and token use a sensitive clipboard offer that expires after 60 seconds."
-                  textFormat: Text.PlainText
-                  color: root.foreground
-                  opacity: 0.62
-                  font.family: root.fontFamily
-                  font.pixelSize: Style.font.bodySmall
-                  wrapMode: Text.WordWrap
+                  spacing: Style.spacing.sm
+
+                  Text {
+                    width: parent.width
+                    text: "IPHONE SHORTCUT WALKTHROUGH"
+                    textFormat: Text.PlainText
+                    color: root.foreground
+                    opacity: 0.82
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    font.weight: Font.DemiBold
+                    wrapMode: Text.WordWrap
+                  }
+
+                  Text {
+                    width: parent.width
+                    text: "Install Tailscale on the phone and join the same tailnet first. Every literal value below has its own Copy button so you can send it to the phone with LocalSend, KDE Connect, or another local transfer tool."
+                    textFormat: Text.PlainText
+                    color: root.foreground
+                    opacity: 0.58
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    wrapMode: Text.WordWrap
+                  }
+
+                  Text {
+                    width: parent.width
+                    topPadding: Style.spacing.sm
+                    text: "1 · CREATE THE SHORTCUT"
+                    textFormat: Text.PlainText
+                    color: root.foreground
+                    opacity: 0.78
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    font.weight: Font.DemiBold
+                  }
+
+                  Text {
+                    width: parent.width
+                    text: "In Shortcuts → Library, tap + and make a blank shortcut. Open its details, enable receiving input, and use the values below. Add a Get Contents of URL action after the input action."
+                    textFormat: Text.PlainText
+                    color: root.foreground
+                    opacity: 0.58
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    wrapMode: Text.WordWrap
+                  }
+
+                  CopyFieldRow {
+                    width: parent.width
+                    fieldId: "shortcut_name"
+                    fieldLabel: "Shortcut name"
+                    fieldValue: "Send to Oma2FA"
+                  }
+
+                  CopyFieldRow {
+                    width: parent.width
+                    fieldId: "receive_type"
+                    fieldLabel: "Receive"
+                    fieldValue: "Text"
+                  }
+
+                  CopyFieldRow {
+                    width: parent.width
+                    fieldId: "receive_source"
+                    fieldLabel: "Receive input from"
+                    fieldValue: "Nowhere"
+                  }
+
+                  CopyFieldRow {
+                    width: parent.width
+                    fieldId: "no_input_behavior"
+                    fieldLabel: "If there is no input"
+                    fieldValue: "Stop and Respond"
+                  }
+
+                  GuideScreenshot {
+                    objectName: "shortcutLibraryGuideImage"
+                    width: parent.width
+                    caption: "The finished shortcut appears in the Library like this."
+                    imageSource: Qt.resolvedUrl("assets/shortcut-library.png")
+                    aspectRatio: 1672 / 941
+                  }
+
+                  Text {
+                    width: parent.width
+                    topPadding: Style.spacing.sm
+                    text: "2 · CONFIGURE GET CONTENTS OF URL"
+                    textFormat: Text.PlainText
+                    color: root.foreground
+                    opacity: 0.78
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    font.weight: Font.DemiBold
+                    wrapMode: Text.WordWrap
+                  }
+
+                  Text {
+                    width: parent.width
+                    text: "Expand Get Contents of URL. Paste the URL, choose POST, add both headers, select a JSON request body, and add the three key/value pairs in order."
+                    textFormat: Text.PlainText
+                    color: root.foreground
+                    opacity: 0.58
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    wrapMode: Text.WordWrap
+                  }
+
+                  CopyFieldRow {
+                    width: parent.width
+                    fieldId: "webhook_url"
+                    fieldLabel: "URL"
+                    fieldValue: String(root.webhookState().endpoint
+                      || "Set up the webhook to create this value")
+                    requiresWebhook: true
+                  }
+
+                  CopyFieldRow {
+                    width: parent.width
+                    fieldId: "http_method"
+                    fieldLabel: "Method"
+                    fieldValue: "POST"
+                  }
+
+                  CopyFieldRow {
+                    width: parent.width
+                    fieldId: "authorization_header"
+                    fieldLabel: "Header 1 · name"
+                    fieldValue: "Authorization"
+                  }
+
+                  CopyFieldRow {
+                    width: parent.width
+                    fieldId: "authorization_value"
+                    fieldLabel: "Header 1 · value"
+                    fieldValue: "Bearer <generated token>"
+                    note: "Copies the complete Bearer value; the token never enters QML."
+                    requiresWebhook: true
+                  }
+
+                  CopyFieldRow {
+                    width: parent.width
+                    fieldId: "content_type_header"
+                    fieldLabel: "Header 2 · name"
+                    fieldValue: "Content-Type"
+                  }
+
+                  CopyFieldRow {
+                    width: parent.width
+                    fieldId: "content_type_value"
+                    fieldLabel: "Header 2 · value"
+                    fieldValue: "application/json"
+                  }
+
+                  CopyFieldRow {
+                    width: parent.width
+                    fieldId: "request_body_type"
+                    fieldLabel: "Request Body"
+                    fieldValue: "JSON"
+                  }
+
+                  CopyFieldRow {
+                    width: parent.width
+                    fieldId: "sender_key"
+                    fieldLabel: "JSON field 1 · key"
+                    fieldValue: "sender"
+                  }
+
+                  CopyFieldRow {
+                    width: parent.width
+                    fieldId: "sender_value"
+                    fieldLabel: "JSON field 1 · value"
+                    fieldValue: "SMS"
+                  }
+
+                  CopyFieldRow {
+                    width: parent.width
+                    fieldId: "body_key"
+                    fieldLabel: "JSON field 2 · key"
+                    fieldValue: "body"
+                  }
+
+                  CopyFieldRow {
+                    width: parent.width
+                    fieldId: "shortcut_input"
+                    fieldLabel: "JSON field 2 · value"
+                    fieldValue: "Shortcut Input"
+                    note: "Reference only: tap the value and insert the blue Shortcut Input magic variable instead of leaving plain text."
+                  }
+
+                  CopyFieldRow {
+                    width: parent.width
+                    fieldId: "source_key"
+                    fieldLabel: "JSON field 3 · key"
+                    fieldValue: "source"
+                  }
+
+                  CopyFieldRow {
+                    width: parent.width
+                    fieldId: "source_value"
+                    fieldLabel: "JSON field 3 · value"
+                    fieldValue: "ios-shortcuts"
+                  }
+
+                  GuideScreenshot {
+                    objectName: "shortcutConfigurationGuideImage"
+                    width: parent.width
+                    caption: "The complete shortcut configuration. The documentation image uses placeholders; your Copy buttons use this computer's actual URL and token."
+                    imageSource: Qt.resolvedUrl("assets/shortcut-configuration.png")
+                    aspectRatio: 853 / 1844
+                    maxImageWidth: Style.space(430)
+                  }
+
+                  Text {
+                    width: parent.width
+                    topPadding: Style.spacing.sm
+                    text: "3 · CREATE THE MESSAGE AUTOMATION"
+                    textFormat: Text.PlainText
+                    color: root.foreground
+                    opacity: 0.78
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    font.weight: Font.DemiBold
+                    wrapMode: Text.WordWrap
+                  }
+
+                  Text {
+                    width: parent.width
+                    text: "Open Shortcuts → Automation, tap +, choose Message, and set Message Contains to the phrase below. Choose Run Immediately, continue, then select Send to Oma2FA. Add a sender filter only if you know every sender that delivers your codes."
+                    textFormat: Text.PlainText
+                    color: root.foreground
+                    opacity: 0.58
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    wrapMode: Text.WordWrap
+                  }
+
+                  CopyFieldRow {
+                    width: parent.width
+                    fieldId: "trigger_phrase"
+                    fieldLabel: "Message Contains"
+                    fieldValue: "code"
+                  }
+
+                  CopyFieldRow {
+                    width: parent.width
+                    fieldId: "run_mode"
+                    fieldLabel: "Run mode"
+                    fieldValue: "Run Immediately"
+                  }
+
+                  GuideScreenshot {
+                    objectName: "shortcutAutomationGuideImage"
+                    width: parent.width
+                    caption: "The Automation tab should show the Message trigger pointing to Send to Oma2FA."
+                    imageSource: Qt.resolvedUrl("assets/shortcut-automation.png")
+                    aspectRatio: 1695 / 928
+                  }
+
+                  Text {
+                    width: parent.width
+                    topPadding: Style.spacing.sm
+                    text: "Send a test message such as “Your verification code is 123456”. A generic notification should appear on the computer, and the code should appear in Oma2FA. Copied setup values use the same sensitive clipboard offer as codes and expire after about 60 seconds."
+                    textFormat: Text.PlainText
+                    color: root.foreground
+                    opacity: 0.58
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    wrapMode: Text.WordWrap
+                  }
                 }
               }
             }

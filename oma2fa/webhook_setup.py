@@ -17,6 +17,25 @@ from .webhook import DEFAULT_WEBHOOK_PORT, WebhookConfig, WebhookConfigError
 
 SERVICE_NAME = "oma2fa-webhook.service"
 _TAILSCALE_NETWORK = ipaddress.ip_network("100.64.0.0/10")
+_SHORTCUT_COPY_VALUES = {
+    "shortcut_name": "Send to Oma2FA",
+    "trigger_phrase": "code",
+    "receive_type": "Text",
+    "receive_source": "Nowhere",
+    "no_input_behavior": "Stop and Respond",
+    "run_mode": "Run Immediately",
+    "http_method": "POST",
+    "authorization_header": "Authorization",
+    "content_type_header": "Content-Type",
+    "content_type_value": "application/json",
+    "request_body_type": "JSON",
+    "sender_key": "sender",
+    "sender_value": "SMS",
+    "body_key": "body",
+    "shortcut_input": "Shortcut Input",
+    "source_key": "source",
+    "source_value": "ios-shortcuts",
+}
 
 
 class WebhookSetupError(RuntimeError):
@@ -321,6 +340,24 @@ class WebhookManager:
         if token_path is None:
             raise WebhookSetupError("Set up the phone webhook first")
         self._copy_secret(self._read_token(token_path))
+        return {"copied": True}
+
+    def copy_setup_field(self, field_id: str) -> dict[str, bool]:
+        """Copy one allowlisted Shortcut value without returning it to QML."""
+
+        if field_id == "webhook_url":
+            return self.copy_endpoint()
+        if field_id == "authorization_value":
+            _, token_path, _ = self._configuration()
+            if token_path is None:
+                raise WebhookSetupError("Set up the phone webhook first")
+            self._copy_secret(f"Bearer {self._read_token(token_path)}")
+            return {"copied": True}
+
+        value = _SHORTCUT_COPY_VALUES.get(field_id)
+        if value is None:
+            raise WebhookSetupError("Unknown Shortcut setup field")
+        self._copy_secret(value)
         return {"copied": True}
 
     def rotate_token(self) -> dict[str, Any]:
