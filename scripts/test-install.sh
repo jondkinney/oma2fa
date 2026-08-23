@@ -211,7 +211,7 @@ target="$test_config/omarchy/plugins/io.github.jondkinney.oma2fa"
 bindings="$test_config/hypr/bindings.lua"
 [[ -f "$target/manifest.json" ]] || fail "plugin manifest was not installed"
 [[ -f "$target/preview.png" ]] || fail "marketplace preview was not installed"
-for shortcut_asset in shortcut-library.png shortcut-configuration.png shortcut-automation.png; do
+for shortcut_asset in shortcut-library.png shortcut-input.png shortcut-configuration.png shortcut-automation.png; do
   [[ -f "$target/assets/$shortcut_asset" && ! -L "$target/assets/$shortcut_asset" ]] ||
     fail "Shortcut walkthrough asset was not installed: $shortcut_asset"
 done

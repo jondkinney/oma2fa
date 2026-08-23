@@ -1917,6 +1917,14 @@ Item {
                     wrapMode: Text.WordWrap
                   }
 
+                  GuideScreenshot {
+                    objectName: "shortcutLibraryGuideImage"
+                    width: parent.width
+                    caption: "Start in the Library by tapping +. After saving, Send to Oma2FA appears as the pink card shown here."
+                    imageSource: Qt.resolvedUrl("assets/shortcut-library.png")
+                    aspectRatio: 1672 / 941
+                  }
+
                   CopyFieldRow {
                     width: parent.width
                     fieldId: "shortcut_name"
@@ -1946,6 +1954,14 @@ Item {
                     fieldLabel: "If there is no input"
                     fieldValue: "Stop and Respond"
                     copyable: false
+                  }
+
+                  GuideScreenshot {
+                    objectName: "shortcutInputGuideImage"
+                    width: parent.width
+                    caption: "The top of the shortcut should show its name and this Receive Text from Nowhere input block."
+                    imageSource: Qt.resolvedUrl("assets/shortcut-input.png")
+                    aspectRatio: 853 / 540
                   }
 
                   Text {
@@ -2078,14 +2094,6 @@ Item {
                     imageSource: Qt.resolvedUrl("assets/shortcut-configuration.png")
                     aspectRatio: 853 / 1844
                     maxImageWidth: Style.space(430)
-                  }
-
-                  GuideScreenshot {
-                    objectName: "shortcutLibraryGuideImage"
-                    width: parent.width
-                    caption: "Save the finished shortcut. Its Library card should look like this."
-                    imageSource: Qt.resolvedUrl("assets/shortcut-library.png")
-                    aspectRatio: 1672 / 941
                   }
 
                   Text {

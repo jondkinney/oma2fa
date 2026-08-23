@@ -278,6 +278,9 @@ ShellRoot {
     harness.expect(String(harness.named("shortcutLibraryGuideImage").imageSource)
       .indexOf("assets/shortcut-library.png") >= 0,
       "Library reference image is missing")
+    harness.expect(String(harness.named("shortcutInputGuideImage").imageSource)
+      .indexOf("assets/shortcut-input.png") >= 0,
+      "shortcut input reference image is missing")
     harness.expect(String(harness.named("shortcutConfigurationGuideImage").imageSource)
       .indexOf("assets/shortcut-configuration.png") >= 0,
       "configuration reference image is missing")
@@ -315,18 +318,24 @@ ShellRoot {
       === Image.Ready, "Automation guide screenshot did not load")
     harness.expect(harness.named("shortcutLibraryGuideImage-content").status
       === Image.Ready, "Library guide screenshot did not load")
+    harness.expect(harness.named("shortcutInputGuideImage-content").status
+      === Image.Ready, "shortcut input guide screenshot did not load")
     harness.expect(harness.named("shortcutConfigurationGuideImage-content").status
       === Image.Ready, "configuration guide screenshot did not load")
     var guidePanel = harness.named("webhookGuidePanel")
-    var configurationImageY = harness.named("shortcutConfigurationGuideImage")
-      .mapToItem(guidePanel, 0, 0).y
     var libraryImageY = harness.named("shortcutLibraryGuideImage")
+      .mapToItem(guidePanel, 0, 0).y
+    var inputImageY = harness.named("shortcutInputGuideImage")
+      .mapToItem(guidePanel, 0, 0).y
+    var configurationImageY = harness.named("shortcutConfigurationGuideImage")
       .mapToItem(guidePanel, 0, 0).y
     var automationImageY = harness.named("shortcutAutomationGuideImage")
       .mapToItem(guidePanel, 0, 0).y
-    harness.expect(configurationImageY < libraryImageY,
-      "Library screenshot should follow the completed shortcut configuration")
-    harness.expect(libraryImageY < automationImageY,
+    harness.expect(libraryImageY < inputImageY,
+      "Library screenshot should introduce the first setup step")
+    harness.expect(inputImageY < configurationImageY,
+      "input screenshot should remain within the first setup step")
+    harness.expect(configurationImageY < automationImageY,
       "Automation screenshot should appear in the final automation step")
     harness.expect(harness.named("copyShortcutFieldButton-webhook_url").enabled === true,
       "configured webhook did not enable URL field copying")

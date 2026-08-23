@@ -84,8 +84,18 @@ LocalSend, KDE Connect, or another local transfer tool.
 
 1. In **Shortcuts → Library**, tap **+** and name the new shortcut
    `Send to Oma2FA`.
+
+<p align="center">
+  <img src="assets/shortcut-library.png" width="760" alt="Shortcuts Library showing the plus button and the pink Send to Oma2FA shortcut card">
+</p>
+
 2. Configure its input block as **Receive Text from Nowhere**. For no input,
    choose **Stop and Respond**.
+
+<p align="center">
+  <img src="assets/shortcut-input.png" width="600" alt="Top of the Send to Oma2FA shortcut showing Receive Text from Nowhere and Stop and Respond">
+</p>
+
 3. Add **Get Contents of URL**. Paste the value from the walkthrough's **URL**
    row directly into that action, expand its options, and select **POST**.
    Apple documents the action in its
@@ -120,11 +130,8 @@ from your own Oma2FA installation.
   <img src="assets/shortcut-configuration.png" width="430" alt="Send to Oma2FA shortcut configured to POST JSON with Authorization and Content-Type headers">
 </p>
 
-6. Save the shortcut. Its Library card should look like this:
-
-<p align="center">
-  <img src="assets/shortcut-library.png" width="760" alt="Shortcuts Library showing the pink Send to Oma2FA shortcut card">
-</p>
+6. Save the shortcut and confirm that its pink **Send to Oma2FA** card appears
+   in the Library as shown in step 1.
 
 #### 4b. Attach it to incoming Messages
 
