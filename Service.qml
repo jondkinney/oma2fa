@@ -20,6 +20,21 @@ Item {
   property var snapshot: ({ codes: [] })
   property var records: []
   property var status: ({ state: "starting", message: "Starting Oma2FA…" })
+  property var webhookSetup: ({
+    configured: false,
+    configuration_present: false,
+    unit_installed: false,
+    enabled: false,
+    running: false,
+    bind: "",
+    port: 8765,
+    transport: "",
+    endpoint: "",
+    token_present: false,
+    tailscale_available: false,
+    tailscale_ip: "",
+    detail: "not configured"
+  })
   property bool bridgeAlive: false
   property bool ready: false
   property string lastError: ""
@@ -229,6 +244,52 @@ Item {
     return id
   }
 
+  function requestWebhookStatus() {
+    return root.sendRequest("webhook_status", {})
+  }
+
+  function configureWebhookTailscale() {
+    return root.sendRequest("webhook_configure_tailscale", { port: 8765 })
+  }
+
+  function setWebhookEnabled(enabled) {
+    return root.sendRequest("webhook_set_enabled", { enabled: enabled === true })
+  }
+
+  function copyWebhookEndpoint() {
+    return root.sendRequest("webhook_copy_endpoint", {})
+  }
+
+  function copyWebhookToken() {
+    return root.sendRequest("webhook_copy_token", {})
+  }
+
+  function rotateWebhookToken() {
+    return root.sendRequest("webhook_rotate_token", { confirmed: true })
+  }
+
+  function applyWebhookSetup(value) {
+    if (!value || typeof value !== "object") return false
+    // Retain only the manager's non-secret allowlist. In particular, an
+    // accidental backend token field must never become long-lived QML state.
+    root.webhookSetup = {
+      configured: value.configured === true,
+      configuration_present: value.configuration_present === true,
+      unit_installed: value.unit_installed === true,
+      enabled: value.enabled === true,
+      running: value.running === true,
+      bind: String(value.bind || "").substring(0, 64),
+      port: Math.max(0, Math.min(65535, Number(value.port) || 8765)),
+      transport: String(value.transport || "").substring(0, 16),
+      endpoint: String(value.endpoint || "").substring(0, 256),
+      token_present: value.token_present === true,
+      tailscale_available: value.tailscale_available === true,
+      tailscale_ip: String(value.tailscale_ip || "").substring(0, 64),
+      detail: String(value.detail || "").substring(0, 80)
+    }
+    return true
+  }
+
   function responseSnapshot(result) {
     if (root.applySnapshot(result)) return true
     if (result && root.applySnapshot(result.snapshot)) return true
@@ -263,6 +324,11 @@ Item {
       if (!root.responseSnapshot(result)) root.clearLocal()
     } else if (method === "activate") {
       root.responseSnapshot(result)
+    } else if (method === "webhook_status"
+        || method === "webhook_configure_tailscale"
+        || method === "webhook_set_enabled"
+        || method === "webhook_rotate_token") {
+      root.applyWebhookSetup(result)
     }
 
     root.lastError = ""

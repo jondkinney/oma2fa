@@ -16,6 +16,7 @@ from .webhook import (
     WebhookConfigError,
     WebhookServer,
 )
+from .webhook_setup import WebhookManager, WebhookSetupError
 
 MAX_REQUEST_CHARS = 65_536
 MAINTENANCE_SECONDS = 15
@@ -50,10 +51,14 @@ class JsonBridge:
         blueferry: BlueFerryAdapter | None = None,
         enable_blueferry: bool = True,
         webhook_config: WebhookConfig | None = None,
+        webhook_manager: WebhookManager | None = None,
     ) -> None:
         self.service = service
         self.output = output
         self.activator = activator or Activator()
+        self.webhook_manager = webhook_manager or WebhookManager(
+            copy_secret=self.activator.copy
+        )
         self.enable_blueferry = enable_blueferry
         self.webhook_config = webhook_config or WebhookConfig()
         self.webhook: WebhookServer | None = None
@@ -286,6 +291,27 @@ class JsonBridge:
             return {"record_id": record_id, "deleted": self.service.delete(record_id)}
         if method == "clear":
             return {"cleared": self.service.clear()}
+        if method == "webhook_status":
+            return self.webhook_manager.status()
+        if method == "webhook_configure_tailscale":
+            raw_port = args.get("port", 8765)
+            if isinstance(raw_port, bool) or not isinstance(raw_port, int):
+                raise RequestError("port must be an integer")
+            return self.webhook_manager.configure_tailscale(raw_port)
+        if method == "webhook_set_enabled":
+            enabled = args.get("enabled")
+            if not isinstance(enabled, bool):
+                raise RequestError("enabled must be a boolean")
+            return self.webhook_manager.set_enabled(enabled)
+        if method == "webhook_copy_endpoint":
+            return self.webhook_manager.copy_endpoint()
+        if method == "webhook_copy_token":
+            return self.webhook_manager.copy_token()
+        if method == "webhook_rotate_token":
+            confirmed = args.get("confirmed", False)
+            if confirmed is not True:
+                raise RequestError("token rotation requires confirmation")
+            return self.webhook_manager.rotate_token()
         raise RequestError("unsupported method")
 
     def handle_line(self, line: str) -> None:
@@ -305,7 +331,7 @@ class JsonBridge:
                 raise RequestError("method must be a non-empty string")
             result = self.dispatch(method, _args(request.get("args", {})))
             self.emit({"id": request_id, "method": method, "ok": True, "result": result})
-        except (RequestError, ValueError, ActivationError) as error:
+        except (RequestError, ValueError, ActivationError, WebhookSetupError) as error:
             self.emit(
                 {
                     "id": request_id,

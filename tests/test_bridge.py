@@ -59,6 +59,9 @@ class FakeActivator:
             raise ActivationError("fixture clipboard failure")
         return ActivationResult(True, paste and target is not None)
 
+    def copy(self, secret: str) -> None:
+        self.secrets.append(secret)
+
     def close(self) -> None:
         self.closed += 1
 

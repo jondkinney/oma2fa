@@ -177,7 +177,8 @@ ShellRoot {
     harness.expect(trigger.Accessible.focusable === true,
       "transport disclosure must be exposed as focusable")
     harness.expect(trigger.x >= title.x + title.width,
-      "transport disclosure overlaps the picker title")
+      "transport disclosure overlaps the picker title (trigger x=" + trigger.x
+        + ", title right=" + (title.x + title.width) + ")")
     harness.expect(trigger.x + trigger.width <= trigger.parent.width + 0.5,
       "transport disclosure extends beyond the title bar")
     harness.expect(String(trigger.Accessible.name)
@@ -207,10 +208,56 @@ ShellRoot {
       "transport popover is wider than the picker card")
     harness.expect(popover.height > 0,
       "transport popover has no visible height")
+    var popoverHover = harness.named("transportPopoverHover")
+    harness.expect(popoverHover.parent === popover,
+      "transport popover hover coverage must include all child controls")
+    harness.expect(popoverHover.enabled === true,
+      "transport popover hover coverage is disabled")
 
     picker.transportDetailsPinned = false
     harness.expect(popover.visible === false,
       "unpinning did not hide transport details")
+    harness.expect(harness.named("manageWebhookButton").Accessible.focusable === true,
+      "webhook manager entry must be keyboard accessible")
+    picker.openWebhookSetup()
+    Qt.callLater(harness.runWebhookSetupAssertions)
+  }
+
+  function runWebhookSetupAssertions() {
+    harness.expect(picker.webhookSetupOpen === true,
+      "opening the webhook manager did not change views")
+    harness.expect(harness.named("webhookSetupPanel").visible === true,
+      "webhook setup panel is not visible")
+    harness.expect(fakeService.statusRequests === 1,
+      "webhook setup did not refresh manager status")
+    harness.expect(harness.named("configureWebhookButton").enabled === true,
+      "Tailscale setup action should be enabled when Tailscale is detected")
+    harness.expect(JSON.stringify(fakeService.webhookSetup).indexOf("PRIVATE_TOKEN") === -1,
+      "webhook setup state retained a bearer token")
+
+    harness.named("configureWebhookButton").triggered()
+    Qt.callLater(harness.runConfiguredWebhookAssertions)
+  }
+
+  function runConfiguredWebhookAssertions() {
+    harness.expect(fakeService.configureRequests === 1,
+      "webhook setup action did not call the service")
+    harness.expect(picker.webhookStatusLabel() === "Ready",
+      "configured webhook did not render as ready")
+    harness.expect(harness.named("copyWebhookEndpointButton").visible === true,
+      "configured webhook did not reveal its copy actions")
+    harness.expect(harness.named("copyWebhookTokenButton").Accessible.focusable === true,
+      "token copy action must be keyboard accessible")
+
+    harness.named("copyWebhookTokenButton").triggered()
+    harness.expect(fakeService.tokenCopyRequests === 1,
+      "token copy action did not call the service")
+    harness.expect(JSON.stringify(fakeService.webhookSetup).indexOf("PRIVATE_TOKEN") === -1,
+      "token copy exposed a bearer token to QML")
+
+    harness.named("webhookBackButton").triggered()
+    harness.expect(picker.webhookSetupOpen === false,
+      "Back did not close the webhook manager")
     picker.transportDetailsPinned = true
     picker.close()
     harness.expect(picker.transportDetailsPinned === false,
@@ -228,6 +275,18 @@ ShellRoot {
     property bool ready: true
     property string lastError: ""
     property var records: []
+    property int statusRequests: 0
+    property int configureRequests: 0
+    property int tokenCopyRequests: 0
+    property var webhookSetup: ({
+      configured: false,
+      configuration_present: false,
+      enabled: false,
+      running: false,
+      endpoint: "",
+      tailscale_available: true,
+      tailscale_ip: "100.100.101.102"
+    })
     property var status: ({
       ready: true,
       sources: {
@@ -238,6 +297,41 @@ ShellRoot {
     })
 
     function refresh() { return 0 }
+    function requestWebhookStatus() {
+      statusRequests++
+      Qt.callLater(function() {
+        fakeService.requestFinished(10, "webhook_status", true, "")
+      })
+      return 10
+    }
+    function configureWebhookTailscale() {
+      configureRequests++
+      webhookSetup = {
+        configured: true,
+        configuration_present: true,
+        enabled: true,
+        running: true,
+        endpoint: "http://100.100.101.102:8765/v1/ingest",
+        tailscale_available: true,
+        tailscale_ip: "100.100.101.102"
+      }
+      Qt.callLater(function() {
+        fakeService.requestFinished(11, "webhook_configure_tailscale", true, "")
+      })
+      return 11
+    }
+    function copyWebhookToken() {
+      tokenCopyRequests++
+      Qt.callLater(function() {
+        fakeService.requestFinished(12, "webhook_copy_token", true, "")
+      })
+      return 12
+    }
+    function copyWebhookEndpoint() { return 13 }
+    function setWebhookEnabled(enabled) { return 14 }
+    function rotateWebhookToken() { return 15 }
+
+    signal requestFinished(int requestId, string method, bool ok, string message)
   }
 
   Item { id: host }

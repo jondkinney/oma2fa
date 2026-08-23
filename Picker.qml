@@ -23,6 +23,10 @@ Item {
   property var capturedTarget: ({})
   property int clockRevision: 0
   property bool transportDetailsPinned: false
+  property bool webhookSetupOpen: false
+  property bool webhookBusy: false
+  property bool tokenRotationArmed: false
+  property string webhookNotice: ""
 
   property color background: Color.menu.background
   property color foreground: Color.menu.text
@@ -100,6 +104,10 @@ Item {
     root.selectedIndex = 0
     root.cursorActive = false
     root.transportDetailsPinned = false
+    root.webhookSetupOpen = false
+    root.webhookBusy = false
+    root.tokenRotationArmed = false
+    root.webhookNotice = ""
     root.capturedTarget = root.sanitizeTarget(payload.target)
     root.disarmPointer()
 
@@ -139,6 +147,10 @@ Item {
     root.selectedIndex = 0
     root.cursorActive = false
     root.transportDetailsPinned = false
+    root.webhookSetupOpen = false
+    root.webhookBusy = false
+    root.tokenRotationArmed = false
+    root.webhookNotice = ""
     displayModel.clear()
     targetCapture.output = ""
     if (targetCapture.running)
@@ -154,6 +166,55 @@ Item {
   function toggle() {
     if (root.opened || root.openingPending) root.dismiss()
     else root.open("{}")
+  }
+
+  function webhookState() {
+    if (!root.service || !root.service.webhookSetup
+        || typeof root.service.webhookSetup !== "object") return ({})
+    return root.service.webhookSetup
+  }
+
+  function webhookStatusLabel() {
+    var value = root.webhookState()
+    if (value.running === true) return "Ready"
+    if (value.configured === true && value.enabled === true) return "Not responding"
+    if (value.configured === true) return "Disabled"
+    if (value.configuration_present === true) return "Needs attention"
+    return "Not configured"
+  }
+
+  function openWebhookSetup() {
+    root.transportDetailsPinned = false
+    root.webhookSetupOpen = true
+    root.tokenRotationArmed = false
+    root.webhookNotice = ""
+    if (root.service && typeof root.service.requestWebhookStatus === "function") {
+      var requestId = root.service.requestWebhookStatus()
+      root.webhookBusy = requestId >= 0
+    }
+    Qt.callLater(function() {
+      if (root.webhookState().configured === true)
+        copyEndpointButton.forceActiveFocus()
+      else
+        configureWebhookButton.forceActiveFocus()
+    })
+  }
+
+  function closeWebhookSetup() {
+    root.webhookSetupOpen = false
+    root.webhookBusy = false
+    root.tokenRotationArmed = false
+    root.webhookNotice = ""
+    Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+  }
+
+  function beginWebhookRequest(requestId) {
+    if (requestId >= 0) {
+      root.webhookBusy = true
+      root.webhookNotice = "Working…"
+    } else {
+      root.webhookNotice = "The local bridge is unavailable."
+    }
   }
 
   function statusState() {
@@ -485,7 +546,13 @@ Item {
   }
 
   function handlePickerKey(event, allowTransportFocus) {
-    if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
+    if (root.webhookSetupOpen) {
+      if (event.key === Qt.Key_Escape)
+        root.closeWebhookSetup()
+      else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
+        webhookBackButton.forceActiveFocus()
+      event.accepted = true
+    } else if (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab) {
       if (allowTransportFocus)
         transportStatusTrigger.forceActiveFocus()
       else
@@ -537,6 +604,41 @@ Item {
     target: root.service
     ignoreUnknownSignals: true
     function onRecordsChanged() { root.rebuildDisplay(true) }
+    function onRequestFinished(requestId, method, ok, message) {
+      if (String(method).indexOf("webhook_") !== 0) return
+      root.webhookBusy = false
+      if (!ok) {
+        root.webhookNotice = String(message || "The webhook request failed.")
+        return
+      }
+      if (method === "webhook_configure_tailscale")
+        root.webhookNotice = "Webhook ready. Copy its URL and token to your phone."
+      else if (method === "webhook_copy_endpoint")
+        root.webhookNotice = "Webhook URL copied for 60 seconds."
+      else if (method === "webhook_copy_token")
+        root.webhookNotice = "Bearer token copied securely for 60 seconds."
+      else if (method === "webhook_set_enabled")
+        root.webhookNotice = root.webhookState().enabled
+          ? "Phone webhook enabled." : "Phone webhook disabled."
+      else if (method === "webhook_rotate_token") {
+        root.tokenRotationArmed = false
+        root.webhookNotice = "Token rotated. Copy the new token to your phone."
+      } else if (method === "webhook_status") {
+        root.webhookNotice = ""
+      }
+      if (root.webhookSetupOpen
+          && (method === "webhook_status"
+            || method === "webhook_configure_tailscale")) {
+        Qt.callLater(function() {
+          if (root.webhookState().configured === true)
+            copyEndpointButton.forceActiveFocus()
+          else if (configureWebhookButton.enabled)
+            configureWebhookButton.forceActiveFocus()
+          else
+            webhookBackButton.forceActiveFocus()
+        })
+      }
+    }
   }
 
   ListModel { id: displayModel }
@@ -630,6 +732,58 @@ Item {
     }
   }
 
+  component SetupButton: Rectangle {
+    id: setupButton
+
+    required property string label
+    property bool emphasized: false
+    signal triggered()
+
+    implicitHeight: Math.max(Style.space(38), Style.spacing.controlHeight)
+    radius: root.cornerRadius
+    color: setupButton.emphasized
+      ? root.selectedBackground
+      : Util.alpha(root.foreground,
+          setupMouse.containsMouse || setupButton.activeFocus ? 0.10 : 0.055)
+    border.width: setupButton.activeFocus ? Math.max(1, Style.normalBorderWidth) : 0
+    border.color: Util.alpha(root.foreground, 0.42)
+    opacity: setupButton.enabled ? 1 : 0.42
+    activeFocusOnTab: setupButton.enabled
+
+    Accessible.role: Accessible.Button
+    Accessible.name: setupButton.label
+    Accessible.focusable: setupButton.enabled
+    Accessible.focused: setupButton.activeFocus
+    Accessible.onPressAction: if (setupButton.enabled) setupButton.triggered()
+
+    Text {
+      anchors.centerIn: parent
+      text: setupButton.label
+      textFormat: Text.PlainText
+      color: setupButton.emphasized ? root.selectedText : root.foreground
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.bodySmall
+      font.weight: Font.DemiBold
+    }
+
+    MouseArea {
+      id: setupMouse
+      anchors.fill: parent
+      enabled: setupButton.enabled
+      hoverEnabled: true
+      cursorShape: setupButton.enabled ? Qt.PointingHandCursor : Qt.ArrowCursor
+      onClicked: setupButton.triggered()
+    }
+
+    Keys.onPressed: function(event) {
+      if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter
+          || event.key === Qt.Key_Space) {
+        if (setupButton.enabled) setupButton.triggered()
+        event.accepted = true
+      }
+    }
+  }
+
   PanelWindow {
     id: panel
     visible: root.opened
@@ -718,13 +872,10 @@ Item {
           Item {
             id: transportStatusTrigger
             objectName: "transportStatusTrigger"
+            anchors.left: titleLabel.right
+            anchors.leftMargin: Style.spacing.lg
             anchors.right: parent.right
             anchors.top: parent.top
-            width: Math.max(0, Math.min(
-              parent.width - titleLabel.implicitWidth - Style.spacing.lg,
-              Math.max(Style.space(140), transportStatusDot.width
-                + Math.min(Style.space(360), transportStatusText.implicitWidth)
-                + transportStatusChevron.implicitWidth + Style.spacing.sm * 4)))
             height: parent.height
             activeFocusOnTab: true
             KeyNavigation.tab: keyCatcher
@@ -839,12 +990,20 @@ Item {
               width: Math.min(Style.space(280), titleBar.width)
               height: transportDetailsColumn.implicitHeight + Style.spacing.md * 2
               visible: root.transportDetailsPinned || transportStatusMouse.containsMouse
-                || transportPopoverMouse.containsMouse
+                || transportPopoverMouse.containsMouse || transportPopoverHover.hovered
               color: root.background
               border.width: Style.normalBorderWidth
               border.color: Util.alpha(root.foreground, 0.20)
               radius: root.cornerRadius
               z: 20
+
+              // A passive hover handler remains active over child controls.
+              // MouseArea.containsMouse alone becomes false when the setup
+              // button's own MouseArea takes the pointer.
+              HoverHandler {
+                id: transportPopoverHover
+                objectName: "transportPopoverHover"
+              }
 
               MouseArea {
                 id: transportPopoverMouse
@@ -945,6 +1104,14 @@ Item {
                       font.pixelSize: Style.font.caption
                     }
                   }
+                }
+
+                SetupButton {
+                  id: manageWebhookButton
+                  objectName: "manageWebhookButton"
+                  width: parent.width
+                  label: "Manage phone webhook…"
+                  onTriggered: root.openWebhookSetup()
                 }
               }
             }
@@ -1240,6 +1407,265 @@ Item {
               actionText: "Close"
             }
           }
+        }
+      }
+
+      Rectangle {
+        id: webhookSetupPanel
+        objectName: "webhookSetupPanel"
+        anchors.fill: parent
+        anchors.topMargin: card.contentTopInset
+        anchors.rightMargin: card.contentRightInset
+        anchors.bottomMargin: card.contentBottomInset
+        anchors.leftMargin: card.contentLeftInset
+        visible: root.webhookSetupOpen
+        color: root.background
+        z: 40
+
+        Keys.onEscapePressed: function(event) {
+          root.closeWebhookSetup()
+          event.accepted = true
+        }
+
+        Column {
+          anchors.fill: parent
+          spacing: root.contentSpacing
+
+          Item {
+            width: parent.width
+            height: root.titleHeight
+
+            SetupButton {
+              id: webhookBackButton
+              objectName: "webhookBackButton"
+              anchors.left: parent.left
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(76)
+              implicitHeight: root.titleHeight
+              label: "← Back"
+              onTriggered: root.closeWebhookSetup()
+            }
+
+            Text {
+              anchors.left: webhookBackButton.right
+              anchors.leftMargin: Style.spacing.md
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              text: "Phone webhook"
+              textFormat: Text.PlainText
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.heading
+              font.weight: Font.DemiBold
+            }
+          }
+
+          Flickable {
+            id: webhookSetupFlickable
+            width: parent.width
+            height: Math.max(0, parent.height - root.titleHeight - root.contentSpacing)
+            contentWidth: width
+            contentHeight: webhookSetupContent.implicitHeight
+            clip: true
+            boundsBehavior: Flickable.StopAtBounds
+
+            Column {
+              id: webhookSetupContent
+              width: webhookSetupFlickable.width
+              spacing: Style.spacing.md
+
+              Rectangle {
+                width: parent.width
+                height: webhookStatusContent.implicitHeight + Style.spacing.md * 2
+                radius: root.cornerRadius
+                color: Util.alpha(root.foreground, 0.055)
+                border.width: Style.normalBorderWidth
+                border.color: Util.alpha(root.border, 0.38)
+
+                Column {
+                  id: webhookStatusContent
+                  anchors.left: parent.left
+                  anchors.right: parent.right
+                  anchors.top: parent.top
+                  anchors.margins: Style.spacing.md
+                  spacing: Style.spacing.xs
+
+                  Row {
+                    width: parent.width
+                    spacing: Style.spacing.sm
+
+                    Rectangle {
+                      width: Style.space(8)
+                      height: width
+                      radius: width / 2
+                      anchors.verticalCenter: parent.verticalCenter
+                      color: root.webhookState().running === true
+                        ? Color.accent
+                        : (root.webhookState().configuration_present === true
+                            && root.webhookState().configured !== true
+                          ? Color.urgent : root.foreground)
+                      opacity: root.webhookState().configured === true ? 0.9 : 0.42
+                    }
+
+                    Text {
+                      text: root.webhookStatusLabel()
+                      textFormat: Text.PlainText
+                      color: root.foreground
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.title
+                      font.weight: Font.DemiBold
+                    }
+                  }
+
+                  Text {
+                    width: parent.width
+                    text: {
+                      var value = root.webhookState()
+                      if (value.endpoint) return String(value.endpoint)
+                      if (value.tailscale_available === true)
+                        return "Tailscale detected at " + String(value.tailscale_ip)
+                      return "Connect this computer and your phone to Tailscale to begin."
+                    }
+                    textFormat: Text.PlainText
+                    color: root.foreground
+                    opacity: 0.58
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                    wrapMode: Text.WrapAnywhere
+                  }
+                }
+              }
+
+              SetupButton {
+                id: configureWebhookButton
+                objectName: "configureWebhookButton"
+                width: parent.width
+                visible: root.webhookState().configured !== true
+                enabled: !root.webhookBusy
+                  && root.webhookState().tailscale_available === true
+                  && root.service
+                  && typeof root.service.configureWebhookTailscale === "function"
+                emphasized: true
+                label: root.webhookBusy ? "Setting up…" : "Set up securely with Tailscale"
+                onTriggered: {
+                  root.beginWebhookRequest(root.service.configureWebhookTailscale())
+                }
+              }
+
+              Row {
+                width: parent.width
+                spacing: Style.spacing.sm
+                visible: root.webhookState().configured === true
+
+                SetupButton {
+                  id: copyEndpointButton
+                  objectName: "copyWebhookEndpointButton"
+                  width: (parent.width - parent.spacing) / 2
+                  enabled: !root.webhookBusy && root.service
+                    && typeof root.service.copyWebhookEndpoint === "function"
+                  emphasized: true
+                  label: "Copy webhook URL"
+                  onTriggered: {
+                    root.beginWebhookRequest(root.service.copyWebhookEndpoint())
+                  }
+                }
+
+                SetupButton {
+                  id: copyTokenButton
+                  objectName: "copyWebhookTokenButton"
+                  width: (parent.width - parent.spacing) / 2
+                  enabled: !root.webhookBusy && root.service
+                    && typeof root.service.copyWebhookToken === "function"
+                  label: "Copy bearer token"
+                  onTriggered: {
+                    root.beginWebhookRequest(root.service.copyWebhookToken())
+                  }
+                }
+              }
+
+              Row {
+                width: parent.width
+                spacing: Style.spacing.sm
+                visible: root.webhookState().configured === true
+
+                SetupButton {
+                  id: webhookEnabledButton
+                  objectName: "webhookEnabledButton"
+                  width: (parent.width - parent.spacing) / 2
+                  enabled: !root.webhookBusy && root.service
+                    && typeof root.service.setWebhookEnabled === "function"
+                  label: root.webhookState().enabled === true
+                    ? "Disable webhook" : "Enable webhook"
+                  onTriggered: {
+                    root.beginWebhookRequest(root.service.setWebhookEnabled(
+                      root.webhookState().enabled !== true))
+                  }
+                }
+
+                SetupButton {
+                  id: rotateTokenButton
+                  objectName: "rotateWebhookTokenButton"
+                  width: (parent.width - parent.spacing) / 2
+                  enabled: !root.webhookBusy && root.service
+                    && typeof root.service.rotateWebhookToken === "function"
+                  label: root.tokenRotationArmed ? "Confirm token rotation" : "Rotate token"
+                  onTriggered: {
+                    if (!root.tokenRotationArmed) {
+                      root.tokenRotationArmed = true
+                      tokenRotationTimer.restart()
+                      root.webhookNotice = "Press again to rotate. Your phone will stop working until updated."
+                    } else {
+                      tokenRotationTimer.stop()
+                      root.beginWebhookRequest(root.service.rotateWebhookToken())
+                    }
+                  }
+                }
+              }
+
+              Text {
+                width: parent.width
+                visible: root.webhookNotice.length > 0
+                text: root.webhookNotice
+                textFormat: Text.PlainText
+                color: root.webhookNotice.indexOf("failed") >= 0
+                  || root.webhookNotice.indexOf("Could not") >= 0
+                  ? Color.urgent : root.foreground
+                opacity: 0.72
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.bodySmall
+                wrapMode: Text.WordWrap
+              }
+
+              Rectangle {
+                width: parent.width
+                height: phoneSetupSteps.implicitHeight + Style.spacing.md * 2
+                radius: root.cornerRadius
+                color: Util.alpha(root.foreground, 0.035)
+
+                Text {
+                  id: phoneSetupSteps
+                  anchors.left: parent.left
+                  anchors.right: parent.right
+                  anchors.top: parent.top
+                  anchors.margins: Style.spacing.md
+                  text: "SET UP THE PHONE\n\n1. Install Tailscale on the phone and join the same network.\n2. In Shortcuts, create a Message automation that runs immediately.\n3. Add Get Contents of URL: POST JSON to the copied URL.\n4. Add Authorization: Bearer <copied token>. Send sender, body, and source fields.\n\nThe URL and token use a sensitive clipboard offer that expires after 60 seconds."
+                  textFormat: Text.PlainText
+                  color: root.foreground
+                  opacity: 0.62
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                  wrapMode: Text.WordWrap
+                }
+              }
+            }
+          }
+        }
+
+        Timer {
+          id: tokenRotationTimer
+          interval: 10000
+          repeat: false
+          onTriggered: root.tokenRotationArmed = false
         }
       }
     }
