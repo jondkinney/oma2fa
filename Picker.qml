@@ -1622,6 +1622,8 @@ Item {
           spacing: root.contentSpacing
 
           Item {
+            id: webhookSetupHeader
+            objectName: "webhookSetupHeader"
             width: parent.width
             height: root.titleHeight
 
@@ -1642,7 +1644,10 @@ Item {
             Text {
               anchors.left: webhookBackButton.right
               anchors.leftMargin: Style.spacing.md
-              anchors.right: parent.right
+              anchors.right: openWebhookGuideButton.visible
+                ? openWebhookGuideButton.left : parent.right
+              anchors.rightMargin: openWebhookGuideButton.visible
+                ? Style.spacing.md : 0
               anchors.verticalCenter: parent.verticalCenter
               text: root.webhookGuideOpen ? "iPhone setup guide" : "Phone webhook"
               textFormat: Text.PlainText
@@ -1650,6 +1655,20 @@ Item {
               font.family: root.fontFamily
               font.pixelSize: Style.font.heading
               font.weight: Font.DemiBold
+              elide: Text.ElideRight
+            }
+
+            SetupButton {
+              id: openWebhookGuideButton
+              objectName: "openWebhookGuideButton"
+              anchors.right: parent.right
+              anchors.verticalCenter: parent.verticalCenter
+              width: Style.space(180)
+              implicitHeight: root.titleHeight
+              visible: !root.webhookGuideOpen
+              emphasized: root.webhookState().configured === true
+              label: "iPhone setup guide →"
+              onTriggered: root.showWebhookGuide()
             }
           }
 
@@ -1666,16 +1685,6 @@ Item {
               id: webhookSetupContent
               width: webhookSetupFlickable.width
               spacing: Style.spacing.md
-
-              SetupButton {
-                id: openWebhookGuideButton
-                objectName: "openWebhookGuideButton"
-                width: parent.width
-                visible: !root.webhookGuideOpen
-                emphasized: root.webhookState().configured === true
-                label: "Open iPhone setup guide →"
-                onTriggered: root.showWebhookGuide()
-              }
 
               Rectangle {
                 objectName: "webhookConnectionStatus"
@@ -1885,14 +1894,6 @@ Item {
                     wrapMode: Text.WordWrap
                   }
 
-                  GuideScreenshot {
-                    objectName: "shortcutAutomationGuideImage"
-                    width: parent.width
-                    caption: "What you are building: a Message trigger that runs Send to Oma2FA immediately."
-                    imageSource: Qt.resolvedUrl("assets/shortcut-automation.png")
-                    aspectRatio: 1695 / 928
-                  }
-
                   Text {
                     width: parent.width
                     topPadding: Style.spacing.sm
@@ -1945,14 +1946,6 @@ Item {
                     fieldLabel: "If there is no input"
                     fieldValue: "Stop and Respond"
                     copyable: false
-                  }
-
-                  GuideScreenshot {
-                    objectName: "shortcutLibraryGuideImage"
-                    width: parent.width
-                    caption: "The finished shortcut appears in the Library like this."
-                    imageSource: Qt.resolvedUrl("assets/shortcut-library.png")
-                    aspectRatio: 1672 / 941
                   }
 
                   Text {
@@ -2087,6 +2080,14 @@ Item {
                     maxImageWidth: Style.space(430)
                   }
 
+                  GuideScreenshot {
+                    objectName: "shortcutLibraryGuideImage"
+                    width: parent.width
+                    caption: "Save the finished shortcut. Its Library card should look like this."
+                    imageSource: Qt.resolvedUrl("assets/shortcut-library.png")
+                    aspectRatio: 1672 / 941
+                  }
+
                   Text {
                     width: parent.width
                     topPadding: Style.spacing.sm
@@ -2124,6 +2125,14 @@ Item {
                     fieldLabel: "Run mode"
                     fieldValue: "Run Immediately"
                     copyable: false
+                  }
+
+                  GuideScreenshot {
+                    objectName: "shortcutAutomationGuideImage"
+                    width: parent.width
+                    caption: "Save the automation. The Automation tab should show the Message trigger running Send to Oma2FA immediately."
+                    imageSource: Qt.resolvedUrl("assets/shortcut-automation.png")
+                    aspectRatio: 1695 / 928
                   }
 
                   Text {

@@ -257,6 +257,14 @@ ShellRoot {
       "unconfigured webhook should open on connection setup")
     harness.expect(harness.named("openWebhookGuideButton").visible === true,
       "connection setup must visibly link to the iPhone guide")
+    var setupHeader = harness.named("webhookSetupHeader")
+    var guideButton = harness.named("openWebhookGuideButton")
+    var guideButtonOrigin = guideButton.mapToItem(setupHeader, 0, 0)
+    harness.expect(guideButton.parent === setupHeader,
+      "iPhone guide action should live in the connection header")
+    harness.expect(Math.abs(guideButtonOrigin.x + guideButton.width
+      - setupHeader.width) <= 0.5,
+      "iPhone guide action should be right aligned in the connection header")
     harness.expect(harness.named("webhookGuidePanel").visible === false,
       "guide should not obscure initial connection provisioning")
     harness.expect(JSON.stringify(fakeService.webhookSetup).indexOf("PRIVATE_TOKEN") === -1,
@@ -309,6 +317,17 @@ ShellRoot {
       === Image.Ready, "Library guide screenshot did not load")
     harness.expect(harness.named("shortcutConfigurationGuideImage-content").status
       === Image.Ready, "configuration guide screenshot did not load")
+    var guidePanel = harness.named("webhookGuidePanel")
+    var configurationImageY = harness.named("shortcutConfigurationGuideImage")
+      .mapToItem(guidePanel, 0, 0).y
+    var libraryImageY = harness.named("shortcutLibraryGuideImage")
+      .mapToItem(guidePanel, 0, 0).y
+    var automationImageY = harness.named("shortcutAutomationGuideImage")
+      .mapToItem(guidePanel, 0, 0).y
+    harness.expect(configurationImageY < libraryImageY,
+      "Library screenshot should follow the completed shortcut configuration")
+    harness.expect(libraryImageY < automationImageY,
+      "Automation screenshot should appear in the final automation step")
     harness.expect(harness.named("copyShortcutFieldButton-webhook_url").enabled === true,
       "configured webhook did not enable URL field copying")
     var selectableFields = [

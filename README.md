@@ -112,18 +112,18 @@ LocalSend, KDE Connect, or another local transfer tool.
    magic variable rather than pasted as plain text. `timestamp` and
    `message_id` are optional; omit them unless the automation has trustworthy
    values.
-6. Save the shortcut. Its Library card should look like this:
-
-<p align="center">
-  <img src="assets/shortcut-library.png" width="760" alt="Shortcuts Library showing the pink Send to Oma2FA shortcut card">
-</p>
-
 The complete action should look like the screenshot below. Its address and
 credential are deliberately replaced with placeholders; use the values copied
 from your own Oma2FA installation.
 
 <p align="center">
   <img src="assets/shortcut-configuration.png" width="430" alt="Send to Oma2FA shortcut configured to POST JSON with Authorization and Content-Type headers">
+</p>
+
+6. Save the shortcut. Its Library card should look like this:
+
+<p align="center">
+  <img src="assets/shortcut-library.png" width="760" alt="Shortcuts Library showing the pink Send to Oma2FA shortcut card">
 </p>
 
 #### 4b. Attach it to incoming Messages
