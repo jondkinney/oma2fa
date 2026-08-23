@@ -59,9 +59,9 @@ That one action creates a private bearer token, writes the webhook environment
 file, installs the hardened `oma2fa-webhook.service` user unit, reloads the
 user service manager, and enables and starts the listener. It does not need
 `sudo`. The manager can later copy the connection values, disable or re-enable
-the service, and rotate its token. Its built-in iPhone walkthrough has a
-separate **Copy** action for every Shortcut field. Token rotation requires
-confirmation and the phone must be updated afterward.
+the service, and rotate its token. Its built-in iPhone walkthrough provides a
+separate **Copy** action for each value that must be typed or pasted. Token
+rotation requires confirmation and the phone must be updated afterward.
 
 After the webhook becomes ready, Oma2FA opens the **iPhone setup guide**
 automatically. You can also open it directly from the picker's empty state with
@@ -75,9 +75,10 @@ can filter by sender or text, and Message automations can
 [run without asking](https://support.apple.com/guide/shortcuts/apd602971e63/ios).
 Names can vary slightly between iOS releases. Keep Oma2FA's **Phone webhook**
 screen open while you build this: the walkthrough there shows these same
-screens and gives every literal field its own **Copy** button. Copy a field on
-the computer, then send it to the phone with LocalSend, KDE Connect, or another
-local transfer tool.
+screens and gives every value that must be typed or pasted its own **Copy**
+button. iOS menu choices remain visible as instructions without unnecessary
+Copy actions. Copy a field on the computer, then send it to the phone with
+LocalSend, KDE Connect, or another local transfer tool.
 
 #### 4a. Build `Send to Oma2FA`
 
@@ -106,9 +107,11 @@ local transfer tool.
    | `source` | The fixed text `ios-shortcuts` |
 
    `sender` and `body` are required. After creating the `body` row, tap its
-   value and insert the blue **Shortcut Input** variable. The Copy button for
-   that row is a spelling reference only. `timestamp` and `message_id` are
-   optional; omit them unless the automation has trustworthy values.
+   value and insert the blue **Shortcut Input** variable. That row is
+   intentionally not copyable because **Shortcut Input** must be selected as a
+   magic variable rather than pasted as plain text. `timestamp` and
+   `message_id` are optional; omit them unless the automation has trustworthy
+   values.
 6. Save the shortcut. Its Library card should look like this:
 
 <p align="center">
@@ -242,10 +245,12 @@ choose **Manage phone webhook…**, then choose **Set up securely with
 Tailscale**. Oma2FA detects the computer's active Tailscale IPv4 address,
 creates a random bearer token, installs and starts the hardened user service,
 and then offers a field-by-field iPhone walkthrough with privacy-safe reference
-screenshots. Every literal field is individually copyable, including the full
-`Bearer <token>` header value; the token itself never enters QML. The manager
-can also enable or disable the listener and rotate its token. Rotation requires
-a second confirmation because the phone must be updated afterward.
+screenshots. Every value that must be typed or pasted is individually copyable,
+including the full `Bearer <token>` header value; iOS menu choices and magic
+variables are shown without Copy buttons. The token itself never enters QML.
+The manager can also enable or disable the listener and rotate its token.
+Rotation requires a second confirmation because the phone must be updated
+afterward.
 
 The setup UI deliberately supports only the direct Tailscale path. Connect the
 computer and phone to the same Tailscale network before opening it. Advanced

@@ -115,19 +115,12 @@ class WebhookManagerTests(unittest.TestCase):
         expected = {
             "shortcut_name": "Send to Oma2FA",
             "trigger_phrase": "code",
-            "receive_type": "Text",
-            "receive_source": "Nowhere",
-            "no_input_behavior": "Stop and Respond",
-            "run_mode": "Run Immediately",
-            "http_method": "POST",
             "authorization_header": "Authorization",
             "content_type_header": "Content-Type",
             "content_type_value": "application/json",
-            "request_body_type": "JSON",
             "sender_key": "sender",
             "sender_value": "SMS",
             "body_key": "body",
-            "shortcut_input": "Shortcut Input",
             "source_key": "source",
             "source_value": "ios-shortcuts",
         }
@@ -138,6 +131,21 @@ class WebhookManagerTests(unittest.TestCase):
 
         with self.assertRaisesRegex(WebhookSetupError, "Unknown Shortcut setup field"):
             self.manager.copy_setup_field("arbitrary-user-controlled-value")
+
+        for field_id in (
+            "receive_type",
+            "receive_source",
+            "no_input_behavior",
+            "run_mode",
+            "http_method",
+            "request_body_type",
+            "shortcut_input",
+        ):
+            with self.subTest(noncopyable_field_id=field_id):
+                with self.assertRaisesRegex(
+                    WebhookSetupError, "Unknown Shortcut setup field"
+                ):
+                    self.manager.copy_setup_field(field_id)
 
     def test_enable_disable_and_rotation(self) -> None:
         self.manager.configure_tailscale()

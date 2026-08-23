@@ -311,6 +311,25 @@ ShellRoot {
       === Image.Ready, "configuration guide screenshot did not load")
     harness.expect(harness.named("copyShortcutFieldButton-webhook_url").enabled === true,
       "configured webhook did not enable URL field copying")
+    var selectableFields = [
+      "receive_type",
+      "receive_source",
+      "no_input_behavior",
+      "http_method",
+      "request_body_type",
+      "shortcut_input",
+      "run_mode"
+    ]
+    for (var fieldIndex = 0; fieldIndex < selectableFields.length; fieldIndex++) {
+      var fieldId = selectableFields[fieldIndex]
+      harness.expect(harness.named("copyShortcutFieldButton-" + fieldId).visible === false,
+        fieldId + " is selected in iOS and should not have a Copy button")
+    }
+    harness.expect(
+      harness.named("copyShortcutFieldButton-authorization_header").visible === true,
+      "typed header names should remain copyable")
+    harness.expect(harness.named("copyShortcutFieldButton-body_key").visible === true,
+      "typed JSON keys should remain copyable")
     harness.expect(String(harness.named("copyShortcutFieldValue-authorization_value").text)
       === "Bearer <generated token>",
       "authorization field should display only a placeholder")

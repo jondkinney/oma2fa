@@ -646,7 +646,7 @@ Item {
         return
       }
       if (method === "webhook_configure_tailscale") {
-        root.webhookNotice = "Webhook ready. Follow the copyable iPhone steps below."
+        root.webhookNotice = "Webhook ready. Follow the guided iPhone steps below."
         root.webhookGuideOpen = true
         webhookSetupFlickable.contentY = 0
       } else if (method === "webhook_copy_endpoint")
@@ -831,10 +831,11 @@ Item {
     required property string fieldLabel
     required property string fieldValue
     property string note: ""
+    property bool copyable: true
     property bool requiresWebhook: false
 
     implicitHeight: Math.max(copyFieldText.implicitHeight,
-      copyFieldButton.implicitHeight) + Style.spacing.sm * 2
+      copyField.copyable ? copyFieldButton.implicitHeight : 0) + Style.spacing.sm * 2
     radius: root.cornerRadius
     color: Util.alpha(root.foreground, 0.045)
     border.width: Math.max(1, Style.normalBorderWidth)
@@ -843,7 +844,7 @@ Item {
     Column {
       id: copyFieldText
       anchors.left: parent.left
-      anchors.right: copyFieldButton.left
+      anchors.right: copyField.copyable ? copyFieldButton.left : parent.right
       anchors.leftMargin: Style.spacing.md
       anchors.rightMargin: Style.spacing.md
       anchors.verticalCenter: parent.verticalCenter
@@ -894,7 +895,9 @@ Item {
       anchors.rightMargin: Style.spacing.sm
       anchors.verticalCenter: parent.verticalCenter
       width: Style.space(68)
-      enabled: !root.webhookBusy
+      visible: copyField.copyable
+      enabled: copyField.copyable
+        && !root.webhookBusy
         && root.service
         && typeof root.service.copyWebhookSetupField === "function"
         && (!copyField.requiresWebhook
@@ -1873,7 +1876,7 @@ Item {
 
                   Text {
                     width: parent.width
-                    text: "Install Tailscale on the phone and join the same tailnet first. Every literal value below has its own Copy button so you can send it to the phone with LocalSend, KDE Connect, or another local transfer tool."
+                    text: "Install Tailscale on the phone and join the same tailnet first. Values you need to type or paste have Copy buttons so you can send them to the phone with LocalSend, KDE Connect, or another local transfer tool. iOS menu choices remain visible as instructions."
                     textFormat: Text.PlainText
                     color: root.foreground
                     opacity: 0.58
@@ -1925,6 +1928,7 @@ Item {
                     fieldId: "receive_type"
                     fieldLabel: "Receive"
                     fieldValue: "Text"
+                    copyable: false
                   }
 
                   CopyFieldRow {
@@ -1932,6 +1936,7 @@ Item {
                     fieldId: "receive_source"
                     fieldLabel: "Receive input from"
                     fieldValue: "Nowhere"
+                    copyable: false
                   }
 
                   CopyFieldRow {
@@ -1939,6 +1944,7 @@ Item {
                     fieldId: "no_input_behavior"
                     fieldLabel: "If there is no input"
                     fieldValue: "Stop and Respond"
+                    copyable: false
                   }
 
                   GuideScreenshot {
@@ -1987,6 +1993,7 @@ Item {
                     fieldId: "http_method"
                     fieldLabel: "Method"
                     fieldValue: "POST"
+                    copyable: false
                   }
 
                   CopyFieldRow {
@@ -2024,6 +2031,7 @@ Item {
                     fieldId: "request_body_type"
                     fieldLabel: "Request Body"
                     fieldValue: "JSON"
+                    copyable: false
                   }
 
                   CopyFieldRow {
@@ -2052,6 +2060,7 @@ Item {
                     fieldId: "shortcut_input"
                     fieldLabel: "JSON field 2 · value"
                     fieldValue: "Shortcut Input"
+                    copyable: false
                     note: "Reference only: tap the value and insert the blue Shortcut Input magic variable instead of leaving plain text."
                   }
 
@@ -2072,7 +2081,7 @@ Item {
                   GuideScreenshot {
                     objectName: "shortcutConfigurationGuideImage"
                     width: parent.width
-                    caption: "The complete shortcut configuration. The documentation image uses placeholders; your Copy buttons use this computer's actual URL and token."
+                    caption: "The complete shortcut configuration. The documentation image uses placeholders; the copyable URL and authorization rows use this computer's actual values."
                     imageSource: Qt.resolvedUrl("assets/shortcut-configuration.png")
                     aspectRatio: 853 / 1844
                     maxImageWidth: Style.space(430)
@@ -2114,6 +2123,7 @@ Item {
                     fieldId: "run_mode"
                     fieldLabel: "Run mode"
                     fieldValue: "Run Immediately"
+                    copyable: false
                   }
 
                   Text {
