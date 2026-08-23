@@ -872,10 +872,14 @@ Item {
           Item {
             id: transportStatusTrigger
             objectName: "transportStatusTrigger"
-            anchors.left: titleLabel.right
-            anchors.leftMargin: Style.spacing.lg
             anchors.right: parent.right
             anchors.top: parent.top
+            width: Math.max(0, Math.min(
+              parent.width - titleLabel.x - titleLabel.width - Style.spacing.lg,
+              Math.max(Style.space(140), Math.min(Style.space(360),
+                transportStatusDot.width + transportStatusText.implicitWidth
+                  + transportStatusChevron.implicitWidth
+                  + Style.spacing.sm * 4))))
             height: parent.height
             activeFocusOnTab: true
             KeyNavigation.tab: keyCatcher

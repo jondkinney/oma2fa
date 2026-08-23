@@ -172,15 +172,34 @@ ShellRoot {
     var trigger = harness.named("transportStatusTrigger")
     var popover = harness.named("transportStatusPopover")
     var title = harness.named("pickerTitleLabel")
+    var titleBar = title.parent
+    var triggerOrigin = trigger.mapToItem(titleBar, 0, 0)
+    var titleOrigin = title.mapToItem(titleBar, 0, 0)
+    var triggerRect = {
+      x: triggerOrigin.x,
+      width: trigger.width,
+      right: triggerOrigin.x + trigger.width
+    }
+    var titleRect = {
+      x: titleOrigin.x,
+      width: title.width,
+      right: titleOrigin.x + title.width
+    }
     harness.expect(trigger.activeFocusOnTab === true,
       "transport disclosure must be keyboard focusable")
     harness.expect(trigger.Accessible.focusable === true,
       "transport disclosure must be exposed as focusable")
-    harness.expect(trigger.x >= title.x + title.width,
-      "transport disclosure overlaps the picker title (trigger x=" + trigger.x
-        + ", title right=" + (title.x + title.width) + ")")
-    harness.expect(trigger.x + trigger.width <= trigger.parent.width + 0.5,
+    harness.expect(triggerRect.x >= titleRect.right,
+      "transport disclosure overlaps the picker title (trigger x=" + triggerRect.x
+        + ", title right=" + titleRect.right + ", title bar=" + titleBar.width
+        + ", parent x=" + trigger.parent.x + ", parent width=" + trigger.parent.width
+        + ", trigger width=" + trigger.width + ")")
+    harness.expect(triggerRect.right <= titleBar.width + 0.5,
       "transport disclosure extends beyond the title bar")
+    harness.expect(Math.abs(triggerRect.right - titleBar.width) <= 0.5,
+      "transport disclosure is not right aligned")
+    harness.expect(triggerRect.width < titleBar.width - titleRect.right - 0.5,
+      "transport disclosure should stay compact instead of filling the title bar")
     harness.expect(String(trigger.Accessible.name)
       === "Active transports: BlueFerry, Phone webhook",
       "transport trigger has the wrong accessible name")
@@ -343,7 +362,11 @@ ShellRoot {
       harness.fail("component load failed: " + component.errorString())
       return
     }
-    picker = component.createObject(host, { service: fakeService })
+    picker = component.createObject(host, {
+      service: fakeService,
+      cardWidth: 620,
+      cardHeight: 560
+    })
     if (!picker) {
       harness.fail("picker creation returned null")
       return
