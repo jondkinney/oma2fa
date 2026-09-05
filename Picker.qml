@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Controls as Controls
 import Quickshell
 import Quickshell.Io
 import Quickshell.Wayland
@@ -25,6 +26,10 @@ Item {
   property bool transportDetailsPinned: false
   property bool webhookSetupOpen: false
   property bool webhookGuideOpen: false
+  property real guideScrollPosition: 0
+  property string copiedField: ""
+  property int fieldCopyRequest: -1
+  property string pendingCopyField: ""
   property bool webhookBusy: false
   property bool tokenRotationArmed: false
   property string webhookNotice: ""
@@ -42,17 +47,22 @@ Item {
   property color selectedText: Color.menu.selectedText
   readonly property int cornerRadius: Style.cornerRadius
   property string fontFamily: Style.font.menuFamily
-  readonly property string guideFontFamily: "sans-serif"
+  readonly property string uiFontFamily: "sans-serif"
+  readonly property string guideFontFamily: root.uiFontFamily
   readonly property int guideBodyFontSize: Style.font.subtitle
   readonly property int guideCaptionFontSize: Style.font.body
   readonly property int guideHeadingFontSize: Style.font.heading
   readonly property int guideTitleFontSize: Style.font.display
-  readonly property int guideParagraphSpacing: Style.spacing.xxl
+  readonly property int guideParagraphSpacing: Style.spacing.lg
   readonly property int guideScreenshotWidth: Style.space(364)
   property int contentMargin: Style.spacing.panelPadding
   property int contentSpacing: Style.spacing.md
   property int cardWidth: Math.min(Style.space(620), panel.width - Style.gapsOut * 2)
-  property int cardHeight: Math.min(Style.space(560), panel.height - Style.gapsOut * 2)
+  property int cardHeight: Math.min(
+    root.webhookSetupOpen ? Style.space(560)
+      : Math.max(Style.space(340), Math.min(Style.space(560),
+          Style.space(180) + displayModel.count * root.rowHeight)),
+    panel.height - Style.gapsOut * 2)
   readonly property int guideCardWidth: Math.min(Style.space(760),
     Math.round(panel.width * 0.92), panel.width - Style.gapsOut * 2)
   readonly property int guideCardHeight: Math.min(Math.round(panel.height * 0.90),
@@ -61,7 +71,7 @@ Item {
   property int searchHeight: Math.max(Style.space(42), Style.spacing.controlHeight)
   property int footerLineHeight: Math.max(Style.space(24),
     Style.font.caption + Style.spacing.sm)
-  property bool footerStacked: footerPrimaryHints.implicitWidth
+  property bool footerStacked: displayModel.count > 0 && footerPrimaryHints.implicitWidth
     + footerSecondaryHints.implicitWidth + Style.spacing.xl > shortcutFooter.width
   property int footerHeight: footerStacked
     ? footerLineHeight * 2 + Style.spacing.xs : footerLineHeight
@@ -211,7 +221,7 @@ Item {
       root.webhookBusy = requestId >= 0
     }
     Qt.callLater(function() {
-      webhookSetupFlickable.contentY = 0
+      webhookSetupFlickable.contentY = root.webhookGuideOpen ? root.guideScrollPosition : 0
       if (root.webhookGuideOpen)
         webhookBackButton.forceActiveFocus()
       else if (root.webhookState().configured === true)
@@ -222,6 +232,7 @@ Item {
   }
 
   function closeWebhookSetup() {
+    if (root.webhookGuideOpen) root.guideScrollPosition = webhookSetupFlickable.contentY
     root.webhookSetupOpen = false
     root.webhookGuideOpen = false
     root.webhookBusy = false
@@ -233,11 +244,14 @@ Item {
   function showWebhookGuide() {
     root.webhookGuideOpen = true
     root.webhookNotice = ""
-    webhookSetupFlickable.contentY = 0
-    Qt.callLater(function() { webhookBackButton.forceActiveFocus() })
+    Qt.callLater(function() {
+      webhookSetupFlickable.contentY = root.guideScrollPosition
+      webhookBackButton.forceActiveFocus()
+    })
   }
 
   function showWebhookConnection() {
+    root.guideScrollPosition = webhookSetupFlickable.contentY
     root.webhookGuideOpen = false
     root.webhookNotice = ""
     webhookSetupFlickable.contentY = 0
@@ -249,6 +263,40 @@ Item {
       else
         webhookBackButton.forceActiveFocus()
     })
+  }
+
+  function jumpToGuideSection(index) {
+    var sections = [guidePreparation, guideShortcut, guideRequest, guideAutomation]
+    var target = sections[index]
+    if (!target) return
+    webhookSetupFlickable.contentY = Math.max(0, Math.min(
+      target.mapToItem(webhookSetupContent, 0, 0).y,
+      webhookSetupFlickable.contentHeight - webhookSetupFlickable.height))
+    root.guideScrollPosition = webhookSetupFlickable.contentY
+  }
+
+  function currentGuideSection() {
+    var sections = [guidePreparation, guideShortcut, guideRequest, guideAutomation]
+    var position = webhookSetupFlickable.contentY + Style.spacing.huge + 2
+    for (var index = sections.length - 1; index > 0; index--) {
+      if (sections[index].mapToItem(webhookSetupContent, 0, 0).y <= position) return index
+    }
+    return 0
+  }
+
+  function copyGuideField(fieldId) {
+    root.copiedField = ""
+    root.pendingCopyField = fieldId
+    root.fieldCopyRequest = root.service.copyWebhookSetupField(fieldId)
+    root.beginWebhookRequest(root.fieldCopyRequest)
+    if (root.fieldCopyRequest >= 0) root.webhookNotice = ""
+  }
+
+  function connectionsText() {
+    if (root.statusState() !== "ready") return root.statusState() === "reconnecting"
+      ? "Reconnecting…" : "Connections"
+    var count = root.activeTransportCount(root.service ? root.service.status : null)
+    return count > 0 ? count + " connected" : "Set up connections"
   }
 
   function beginWebhookRequest(requestId) {
@@ -689,6 +737,11 @@ Item {
     ignoreUnknownSignals: true
     function onRecordsChanged() { root.rebuildDisplay(true) }
     function onRequestFinished(requestId, method, ok, message) {
+      if (method === "webhook_copy_setup_field" && requestId === root.fieldCopyRequest) {
+        root.copiedField = ok ? root.pendingCopyField : ""
+        root.fieldCopyRequest = -1
+        if (ok) copyFeedbackTimer.restart()
+      }
       if (method === "source_set_enabled" || method === "webhook_set_enabled") {
         root.sourceToggleBusy = ({})
         root.sourceNotice = ok ? "" : String(message || "The source could not be changed.")
@@ -709,7 +762,7 @@ Item {
       else if (method === "webhook_copy_token")
         root.webhookNotice = "Raw bearer token copied securely for 60 seconds."
       else if (method === "webhook_copy_setup_field")
-        root.webhookNotice = "Shortcut field copied for 60 seconds."
+        root.webhookNotice = ""
       else if (method === "webhook_set_enabled")
         root.webhookNotice = root.webhookState().enabled
           ? "Phone webhook enabled." : "Phone webhook disabled."
@@ -734,6 +787,12 @@ Item {
         })
       }
     }
+  }
+
+  Timer {
+    id: copyFeedbackTimer
+    interval: 2200
+    onTriggered: root.copiedField = ""
   }
 
   ListModel { id: displayModel }
@@ -821,8 +880,8 @@ Item {
       text: shortcutHint.actionText
       textFormat: Text.PlainText
       color: root.foreground
-      opacity: 0.50
-      font.family: root.fontFamily
+      opacity: 0.68
+      font.family: root.uiFontFamily
       font.pixelSize: Style.font.caption
     }
   }
@@ -832,7 +891,7 @@ Item {
 
     required property string label
     property bool emphasized: false
-    property string fontFamily: root.fontFamily
+    property string fontFamily: root.uiFontFamily
     property int fontSize: Style.font.bodySmall
     signal triggered()
 
@@ -881,6 +940,12 @@ Item {
     }
   }
 
+  component GuideFieldPair: Grid {
+    columns: width >= Style.space(540) ? 2 : 1
+    spacing: Style.spacing.sm
+    readonly property real cellWidth: (width - spacing * (columns - 1)) / columns
+  }
+
   component CopyFieldRow: Rectangle {
     id: copyField
 
@@ -892,10 +957,12 @@ Item {
     property bool requiresWebhook: false
 
     implicitHeight: Math.max(copyFieldText.implicitHeight,
-      copyField.copyable ? copyFieldButton.implicitHeight : 0) + Style.spacing.lg * 2
+      copyField.copyable ? copyFieldButton.implicitHeight : 0) + Style.spacing.sm * 2
     radius: root.cornerRadius
-    color: Util.alpha(root.foreground, 0.045)
-    border.width: Math.max(1, Style.normalBorderWidth)
+    color: copyField.fieldId === "shortcut_input" ? Util.alpha(Color.accent, 0.12)
+      : copyField.copyable ? Util.alpha(root.foreground, 0.045) : "transparent"
+    border.width: copyField.copyable || copyField.fieldId === "shortcut_input"
+      ? Math.max(1, Style.normalBorderWidth) : 0
     border.color: Util.alpha(root.border, 0.28)
 
     Column {
@@ -905,12 +972,13 @@ Item {
       anchors.leftMargin: Style.spacing.md
       anchors.rightMargin: Style.spacing.md
       anchors.verticalCenter: parent.verticalCenter
-      spacing: Style.spacing.md
+      spacing: Style.spacing.xs
 
       Text {
         objectName: "copyShortcutFieldLabel-" + copyField.fieldId
         width: parent.width
-        text: copyField.fieldLabel
+        text: copyField.copyable || copyField.fieldId === "shortcut_input"
+          ? copyField.fieldLabel : copyField.fieldLabel + "  →  " + copyField.fieldValue
         textFormat: Text.PlainText
         color: root.foreground
         opacity: 0.68
@@ -920,8 +988,27 @@ Item {
         wrapMode: Text.WordWrap
       }
 
+      Rectangle {
+        visible: copyField.fieldId === "shortcut_input"
+        width: Math.min(parent.width, variableLabel.implicitWidth + Style.spacing.md * 2)
+        height: variableLabel.implicitHeight + Style.spacing.sm * 2
+        color: Util.alpha(Color.accent, 0.20)
+        radius: Style.space(4)
+        Text {
+          id: variableLabel
+          anchors.centerIn: parent
+          text: "↳ Shortcut Input"
+          textFormat: Text.PlainText
+          color: root.foreground
+          font.family: root.uiFontFamily
+          font.pixelSize: Style.font.body
+          font.weight: Font.DemiBold
+        }
+      }
+
       Text {
         objectName: "copyShortcutFieldValue-" + copyField.fieldId
+        visible: copyField.copyable
         width: parent.width
         text: copyField.fieldValue
         textFormat: Text.PlainText
@@ -954,7 +1041,7 @@ Item {
       anchors.right: parent.right
       anchors.rightMargin: Style.spacing.sm
       anchors.verticalCenter: parent.verticalCenter
-      width: Style.space(68)
+      width: Style.space(76)
       fontFamily: root.guideFontFamily
       fontSize: Style.font.bodySmall
       visible: copyField.copyable
@@ -964,9 +1051,8 @@ Item {
         && typeof root.service.copyWebhookSetupField === "function"
         && (!copyField.requiresWebhook
           || root.webhookState().configured === true)
-      label: "Copy"
-      onTriggered: root.beginWebhookRequest(
-        root.service.copyWebhookSetupField(copyField.fieldId))
+      label: root.copiedField === copyField.fieldId ? "Copied ✓" : "Copy"
+      onTriggered: root.copyGuideField(copyField.fieldId)
     }
   }
 
@@ -976,7 +1062,8 @@ Item {
     required property string caption
     required property url imageSource
     required property real aspectRatio
-    property real maxImageWidth: root.guideScreenshotWidth
+    property bool expanded: false
+    property real maxImageWidth: expanded ? width : root.guideScreenshotWidth
 
     spacing: Style.spacing.lg
 
@@ -1004,7 +1091,9 @@ Item {
         objectName: guideScreenshot.objectName + "-frame"
         anchors.horizontalCenter: parent.horizontalCenter
         width: Math.min(parent.width, guideScreenshot.maxImageWidth)
-        height: width / Math.max(0.01, guideScreenshot.aspectRatio)
+        height: guideScreenshot.expanded
+          ? width / Math.max(0.01, guideScreenshot.aspectRatio)
+          : Math.min(Style.space(250), width / Math.max(0.01, guideScreenshot.aspectRatio))
         radius: root.cornerRadius
         color: "black"
         border.width: Math.max(1, Style.normalBorderWidth)
@@ -1020,7 +1109,19 @@ Item {
           cache: true
           smooth: true
         }
+        MouseArea {
+          anchors.fill: parent
+          cursorShape: Qt.PointingHandCursor
+          onClicked: guideScreenshot.expanded = !guideScreenshot.expanded
+        }
       }
+    }
+    SetupButton {
+      objectName: guideScreenshot.objectName + "-expand"
+      anchors.horizontalCenter: parent.horizontalCenter
+      width: Style.space(180)
+      label: guideScreenshot.expanded ? "Collapse image" : "Enlarge image"
+      onTriggered: guideScreenshot.expanded = !guideScreenshot.expanded
     }
   }
 
@@ -1128,7 +1229,7 @@ Item {
             text: "Oma2FA"
             textFormat: Text.PlainText
             color: root.foreground
-            font.family: root.fontFamily
+            font.family: root.uiFontFamily
             font.pixelSize: Style.font.heading
             font.weight: Font.DemiBold
           }
@@ -1186,7 +1287,7 @@ Item {
               radius: Math.min(root.cornerRadius, Style.space(6))
               color: Util.alpha(root.foreground,
                 transportStatusMouse.containsMouse || root.transportDetailsPinned
-                  || transportStatusTrigger.activeFocus ? 0.055 : 0)
+                  || transportStatusTrigger.activeFocus ? 0.10 : 0.045)
               border.width: root.transportDetailsPinned
                 || transportStatusTrigger.activeFocus ? Style.normalBorderWidth : 0
               border.color: Util.alpha(root.foreground, 0.18)
@@ -1217,12 +1318,12 @@ Item {
                 width: Math.max(0, transportStatusSummary.width
                   - transportStatusDot.width - transportStatusChevron.width
                   - Style.spacing.sm * 2)
-                text: root.statusText()
+                text: root.connectionsText()
                 textFormat: Text.PlainText
                 color: root.foreground
-                opacity: 0.62
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.caption
+                opacity: 0.85
+                font.family: root.uiFontFamily
+                font.pixelSize: Style.font.bodySmall
                 elide: Text.ElideLeft
               }
 
@@ -1353,7 +1454,7 @@ Item {
                       text: String(transportRow.modelData.name)
                       textFormat: Text.PlainText
                       color: root.foreground
-                      font.family: root.fontFamily
+                      font.family: root.uiFontFamily
                       font.pixelSize: Style.font.bodySmall
                       font.weight: transportRow.modelData.active ? Font.DemiBold : Font.Normal
                       elide: Text.ElideRight
@@ -1535,7 +1636,7 @@ Item {
                   text: codeRow.serviceName
                   textFormat: Text.PlainText
                   color: codeRow.hasCursor ? root.selectedText : root.foreground
-                  font.family: root.fontFamily
+                  font.family: root.uiFontFamily
                   font.pixelSize: Style.font.title
                   font.weight: Font.Medium
                   elide: Text.ElideRight
@@ -1546,8 +1647,8 @@ Item {
                   text: codeRow.detailText
                   textFormat: Text.PlainText
                   color: codeRow.hasCursor ? root.selectedText : root.foreground
-                  opacity: 0.56
-                  font.family: root.fontFamily
+                  opacity: 0.70
+                  font.family: root.uiFontFamily
                   font.pixelSize: Style.font.bodySmall
                   elide: Text.ElideRight
                 }
@@ -1638,16 +1739,18 @@ Item {
 
             Text {
               width: parent.width
+              objectName: "emptyStateTitle"
               text: {
                 if (!root.service) return "Oma2FA service is unavailable"
                 if (root.service.bridgeAlive !== true) return "Waiting for the local bridge"
                 if (root.filterText) return "No matches for “" + root.filterText + "”"
-                return "No recent verification codes"
+                return root.activeTransportCount(root.service.status) > 0
+                  ? "Ready for your next code" : "Connect your messages"
               }
               textFormat: Text.PlainText
               color: root.foreground
               opacity: 0.78
-              font.family: root.fontFamily
+              font.family: root.uiFontFamily
               font.pixelSize: Style.font.title
               horizontalAlignment: Text.AlignHCenter
               wrapMode: Text.WordWrap
@@ -1655,17 +1758,20 @@ Item {
 
             Text {
               width: parent.width
+              objectName: "emptyStateDescription"
               text: {
                 if (!root.service) return "Enable the plugin service, then reopen this picker."
                 if (root.service.bridgeAlive !== true)
                   return String(root.service.lastError || "Oma2FA will reconnect automatically.")
                 if (root.filterText) return "Try a service name, transport, or another code."
-                return "Codes appear here when a paired SMS transport detects one."
+                return root.activeTransportCount(root.service.status) > 0
+                  ? "New codes will appear here automatically."
+                  : "Choose a connection to receive verification codes here."
               }
               textFormat: Text.PlainText
               color: root.foreground
-              opacity: 0.48
-              font.family: root.fontFamily
+              opacity: 0.70
+              font.family: root.uiFontFamily
               font.pixelSize: Style.font.bodySmall
               horizontalAlignment: Text.AlignHCenter
               wrapMode: Text.WordWrap
@@ -1673,14 +1779,18 @@ Item {
 
             SetupButton {
               objectName: "emptyStateSetupButton"
-              width: Math.min(parent.width, Style.space(250))
+              width: Math.min(parent.width, Style.space(190))
               x: (parent.width - width) / 2
               visible: !root.filterText
                 && root.service
                 && root.service.bridgeAlive === true
-              emphasized: true
-              label: "Open iPhone setup guide"
-              onTriggered: root.openWebhookSetup(true)
+              emphasized: root.activeTransportCount(root.service.status) === 0
+              label: root.activeTransportCount(root.service.status) > 0
+                ? "iPhone setup guide" : "Set up connections"
+              onTriggered: {
+                if (root.activeTransportCount(root.service.status) > 0) root.openWebhookSetup(true)
+                else root.transportDetailsPinned = true
+              }
             }
           }
         }
@@ -1695,6 +1805,7 @@ Item {
           Row {
             id: footerPrimaryHints
             objectName: "primaryHints"
+            visible: displayModel.count > 0
             anchors.left: parent.left
             y: root.footerStacked ? 0 : Math.max(0, (parent.height - height) / 2)
             spacing: Style.spacing.xl * 2
@@ -1723,6 +1834,7 @@ Item {
 
             ShortcutHint {
               hookName: "removeShortcut"
+              visible: displayModel.count > 0
               shortcutText: "Delete"
               actionText: "Remove"
             }
@@ -1812,14 +1924,44 @@ Item {
             }
           }
 
+          Row {
+            id: guideNavigation
+            objectName: "guideNavigation"
+            visible: root.webhookGuideOpen
+            width: parent.width
+            height: visible ? Style.space(38) : 0
+            spacing: Style.spacing.xs
+            Repeater {
+              model: ["Preparation", "Create shortcut", "Configure request", "Automation & test"]
+              SetupButton {
+                required property int index
+                required property string modelData
+                objectName: "guideNavigation-" + index
+                width: (guideNavigation.width - Style.spacing.xs * 3) / 4
+                height: guideNavigation.height
+                label: guideNavigation.width < Style.space(600)
+                  ? ["Prepare", "Shortcut", "Request", "Test"][index] : modelData
+                Accessible.name: modelData
+                emphasized: root.currentGuideSection() === index
+                fontSize: Style.font.caption
+                onTriggered: root.jumpToGuideSection(index)
+              }
+            }
+          }
+
           Flickable {
             id: webhookSetupFlickable
+            objectName: "webhookSetupFlickable"
             width: parent.width
-            height: Math.max(0, parent.height - root.titleHeight - root.contentSpacing)
+            height: Math.max(0, parent.height - root.titleHeight - root.contentSpacing
+              - (guideNavigation.visible ? guideNavigation.height + root.contentSpacing : 0))
             contentWidth: width
             contentHeight: webhookSetupContent.implicitHeight
             clip: true
             boundsBehavior: Flickable.StopAtBounds
+            Controls.ScrollBar.vertical: Controls.ScrollBar {
+              policy: Controls.ScrollBar.AsNeeded
+            }
 
             Column {
               id: webhookSetupContent
@@ -2013,6 +2155,7 @@ Item {
                   spacing: root.guideParagraphSpacing
 
                   Text {
+                    id: guidePreparation
                     objectName: "webhookGuideTitle"
                     width: parent.width
                     text: "Set up your iPhone"
@@ -2028,10 +2171,11 @@ Item {
                   GuideBodyText {
                     objectName: "webhookGuideIntro"
                     width: parent.width
-                    text: "First, install Tailscale on your phone and join the same tailnet. Values you need to type or paste have Copy buttons, so you can send them to the phone with LocalSend, KDE Connect, or another local transfer tool. Choices made from iOS menus remain visible as instructions."
+                    text: "1. Connect your iPhone and computer to the same Tailscale network.\n2. Set up the phone webhook on the Connection page.\n3. Open Shortcuts on your iPhone.\n\nCopy buttons provide values to paste. Arrow rows show choices to make in iOS. Transfer copied values with your preferred local sharing app; they clear from the clipboard after about 60 seconds."
                   }
 
                   GuideSectionHeading {
+                    id: guideShortcut
                     objectName: "webhookGuideStep1Heading"
                     width: parent.width
                     text: "1. Create the Shortcut"
@@ -2050,35 +2194,45 @@ Item {
                     aspectRatio: 1672 / 941
                   }
 
-                  CopyFieldRow {
+                  Column {
+                    objectName: "guideInputGroup"
                     width: parent.width
-                    fieldId: "shortcut_name"
-                    fieldLabel: "Shortcut name"
-                    fieldValue: "Send to Oma2FA"
-                  }
+                    spacing: Style.spacing.xs
+                    GuideSectionHeading {
+                      width: parent.width
+                      topPadding: Style.spacing.md
+                      text: "Shortcut input"
+                    }
+                    CopyFieldRow {
+                      width: parent.width
+                      fieldId: "shortcut_name"
+                      fieldLabel: "Shortcut name"
+                      fieldValue: "Send to Oma2FA"
+                    }
 
-                  CopyFieldRow {
-                    width: parent.width
-                    fieldId: "receive_type"
-                    fieldLabel: "Receive"
-                    fieldValue: "Text"
-                    copyable: false
-                  }
+                    CopyFieldRow {
+                      width: parent.width
+                      fieldId: "receive_type"
+                      fieldLabel: "Receive"
+                      fieldValue: "Text"
+                      copyable: false
+                    }
 
-                  CopyFieldRow {
-                    width: parent.width
-                    fieldId: "receive_source"
-                    fieldLabel: "Receive input from"
-                    fieldValue: "Nowhere"
-                    copyable: false
-                  }
+                    CopyFieldRow {
+                      width: parent.width
+                      fieldId: "receive_source"
+                      fieldLabel: "Receive input from"
+                      fieldValue: "Nowhere"
+                      copyable: false
+                    }
 
-                  CopyFieldRow {
-                    width: parent.width
-                    fieldId: "no_input_behavior"
-                    fieldLabel: "If there is no input"
-                    fieldValue: "Stop and Respond"
-                    copyable: false
+                    CopyFieldRow {
+                      width: parent.width
+                      fieldId: "no_input_behavior"
+                      fieldLabel: "If there is no input"
+                      fieldValue: "Stop and Respond"
+                      copyable: false
+                    }
                   }
 
                   GuideScreenshot {
@@ -2090,6 +2244,7 @@ Item {
                   }
 
                   GuideSectionHeading {
+                    id: guideRequest
                     objectName: "webhookGuideStep2Heading"
                     width: parent.width
                     text: "2. Configure Get Contents of URL"
@@ -2100,103 +2255,163 @@ Item {
                     text: "Expand Get Contents of URL. Paste the URL, choose POST, add both headers, select a JSON request body, and add the three key/value pairs in order."
                   }
 
-                  CopyFieldRow {
+                  Column {
+                    objectName: "guideRequestGroup"
                     width: parent.width
-                    fieldId: "webhook_url"
-                    fieldLabel: "URL"
-                    fieldValue: String(root.webhookState().endpoint
-                      || "Set up the webhook to create this value")
-                    requiresWebhook: true
+                    spacing: Style.spacing.xs
+                    GuideSectionHeading {
+                      width: parent.width
+                      topPadding: Style.spacing.md
+                      text: "Request"
+                    }
+                    CopyFieldRow {
+                      width: parent.width
+                      fieldId: "webhook_url"
+                      fieldLabel: "URL"
+                      fieldValue: String(root.webhookState().endpoint
+                        || "Set up the webhook to create this value")
+                      requiresWebhook: true
+                    }
+
+                    CopyFieldRow {
+                      width: parent.width
+                      fieldId: "http_method"
+                      fieldLabel: "Method"
+                      fieldValue: "POST"
+                      copyable: false
+                    }
                   }
 
-                  CopyFieldRow {
+                  Column {
+                    objectName: "guideAuthorizationGroup"
                     width: parent.width
-                    fieldId: "http_method"
-                    fieldLabel: "Method"
-                    fieldValue: "POST"
-                    copyable: false
+                    spacing: Style.spacing.xs
+                    GuideSectionHeading {
+                      width: parent.width
+                      topPadding: Style.spacing.md
+                      text: "Authorization header"
+                    }
+                    GuideFieldPair {
+                      objectName: "fieldPair-authorization_header"
+                      width: parent.width
+                      CopyFieldRow {
+                        width: parent.cellWidth
+                        fieldId: "authorization_header"
+                        fieldLabel: "Header 1 · name"
+                        fieldValue: "Authorization"
+                      }
+
+                      CopyFieldRow {
+                        width: parent.cellWidth
+                        fieldId: "authorization_value"
+                        fieldLabel: "Header 1 · value"
+                        fieldValue: "Bearer <generated token>"
+                        note: "Copies your complete authorization value."
+                        requiresWebhook: true
+                      }
+                    }
                   }
 
-                  CopyFieldRow {
+                  Column {
+                    objectName: "guideContentTypeGroup"
                     width: parent.width
-                    fieldId: "authorization_header"
-                    fieldLabel: "Header 1 · name"
-                    fieldValue: "Authorization"
+                    spacing: Style.spacing.xs
+                    GuideSectionHeading {
+                      width: parent.width
+                      topPadding: Style.spacing.md
+                      text: "Content type header"
+                    }
+                    GuideFieldPair {
+                      objectName: "fieldPair-content_type_header"
+                      width: parent.width
+                      CopyFieldRow {
+                        width: parent.cellWidth
+                        fieldId: "content_type_header"
+                        fieldLabel: "Header 2 · name"
+                        fieldValue: "Content-Type"
+                      }
+
+                      CopyFieldRow {
+                        width: parent.cellWidth
+                        fieldId: "content_type_value"
+                        fieldLabel: "Header 2 · value"
+                        fieldValue: "application/json"
+                      }
+                    }
                   }
 
-                  CopyFieldRow {
+                  Column {
+                    objectName: "guideJsonGroup"
                     width: parent.width
-                    fieldId: "authorization_value"
-                    fieldLabel: "Header 1 · value"
-                    fieldValue: "Bearer <generated token>"
-                    note: "Copies the complete Bearer value; the token never enters QML."
-                    requiresWebhook: true
-                  }
+                    spacing: Style.spacing.xs
+                    GuideSectionHeading {
+                      width: parent.width
+                      topPadding: Style.spacing.md
+                      text: "JSON body"
+                    }
+                    CopyFieldRow {
+                      width: parent.width
+                      fieldId: "request_body_type"
+                      fieldLabel: "Request Body"
+                      fieldValue: "JSON"
+                      copyable: false
+                    }
 
-                  CopyFieldRow {
-                    width: parent.width
-                    fieldId: "content_type_header"
-                    fieldLabel: "Header 2 · name"
-                    fieldValue: "Content-Type"
-                  }
+                    GuideFieldPair {
+                      objectName: "fieldPair-sender_key"
+                      width: parent.width
+                      CopyFieldRow {
+                        width: parent.cellWidth
+                        fieldId: "sender_key"
+                        fieldLabel: "JSON field 1 · key"
+                        fieldValue: "sender"
+                      }
 
-                  CopyFieldRow {
-                    width: parent.width
-                    fieldId: "content_type_value"
-                    fieldLabel: "Header 2 · value"
-                    fieldValue: "application/json"
-                  }
+                      CopyFieldRow {
+                        width: parent.cellWidth
+                        fieldId: "sender_value"
+                        fieldLabel: "JSON field 1 · value"
+                        fieldValue: "SMS"
+                      }
+                    }
 
-                  CopyFieldRow {
-                    width: parent.width
-                    fieldId: "request_body_type"
-                    fieldLabel: "Request Body"
-                    fieldValue: "JSON"
-                    copyable: false
-                  }
+                    GuideFieldPair {
+                      objectName: "fieldPair-body_key"
+                      width: parent.width
+                      CopyFieldRow {
+                        width: parent.cellWidth
+                        fieldId: "body_key"
+                        fieldLabel: "JSON field 2 · key"
+                        fieldValue: "body"
+                      }
 
-                  CopyFieldRow {
-                    width: parent.width
-                    fieldId: "sender_key"
-                    fieldLabel: "JSON field 1 · key"
-                    fieldValue: "sender"
-                  }
+                      CopyFieldRow {
+                        width: parent.cellWidth
+                        fieldId: "shortcut_input"
+                        fieldLabel: "JSON field 2 · value"
+                        fieldValue: "Shortcut Input"
+                        copyable: false
+                        note: "Insert the variable—don’t type this text. Tap the value and choose the blue Shortcut Input variable."
+                      }
+                    }
 
-                  CopyFieldRow {
-                    width: parent.width
-                    fieldId: "sender_value"
-                    fieldLabel: "JSON field 1 · value"
-                    fieldValue: "SMS"
-                  }
+                    GuideFieldPair {
+                      objectName: "fieldPair-source_key"
+                      width: parent.width
+                      CopyFieldRow {
+                        width: parent.cellWidth
+                        fieldId: "source_key"
+                        fieldLabel: "JSON field 3 · key"
+                        fieldValue: "source"
+                      }
 
-                  CopyFieldRow {
-                    width: parent.width
-                    fieldId: "body_key"
-                    fieldLabel: "JSON field 2 · key"
-                    fieldValue: "body"
-                  }
-
-                  CopyFieldRow {
-                    width: parent.width
-                    fieldId: "shortcut_input"
-                    fieldLabel: "JSON field 2 · value"
-                    fieldValue: "Shortcut Input"
-                    copyable: false
-                    note: "Reference only: tap the value and insert the blue Shortcut Input magic variable instead of leaving plain text."
-                  }
-
-                  CopyFieldRow {
-                    width: parent.width
-                    fieldId: "source_key"
-                    fieldLabel: "JSON field 3 · key"
-                    fieldValue: "source"
-                  }
-
-                  CopyFieldRow {
-                    width: parent.width
-                    fieldId: "source_value"
-                    fieldLabel: "JSON field 3 · value"
-                    fieldValue: "ios-shortcuts"
+                      CopyFieldRow {
+                        width: parent.cellWidth
+                        fieldId: "source_value"
+                        fieldLabel: "JSON field 3 · value"
+                        fieldValue: "ios-shortcuts"
+                      }
+                    }
                   }
 
                   GuideScreenshot {
@@ -2208,9 +2423,10 @@ Item {
                   }
 
                   GuideSectionHeading {
+                    id: guideAutomation
                     objectName: "webhookGuideStep3Heading"
                     width: parent.width
-                    text: "3. Create the Message Automation"
+                    text: "3. Automation & test"
                   }
 
                   GuideBodyText {
@@ -2218,19 +2434,29 @@ Item {
                     text: "Open Shortcuts → Automation, tap +, choose Message, and set Message Contains to the phrase below. Choose Run Immediately, continue, then select Send to Oma2FA. Add a sender filter only if you know every sender that delivers your codes."
                   }
 
-                  CopyFieldRow {
+                  Column {
+                    objectName: "guideTriggerGroup"
                     width: parent.width
-                    fieldId: "trigger_phrase"
-                    fieldLabel: "Message Contains"
-                    fieldValue: "code"
-                  }
+                    spacing: Style.spacing.xs
+                    GuideSectionHeading {
+                      width: parent.width
+                      topPadding: Style.spacing.md
+                      text: "Message trigger"
+                    }
+                    CopyFieldRow {
+                      width: parent.width
+                      fieldId: "trigger_phrase"
+                      fieldLabel: "Message Contains"
+                      fieldValue: "code"
+                    }
 
-                  CopyFieldRow {
-                    width: parent.width
-                    fieldId: "run_mode"
-                    fieldLabel: "Run mode"
-                    fieldValue: "Run Immediately"
-                    copyable: false
+                    CopyFieldRow {
+                      width: parent.width
+                      fieldId: "run_mode"
+                      fieldLabel: "Run mode"
+                      fieldValue: "Run Immediately"
+                      copyable: false
+                    }
                   }
 
                   GuideScreenshot {
@@ -2241,10 +2467,24 @@ Item {
                     aspectRatio: 1695 / 928
                   }
 
+                  GuideSectionHeading {
+                    width: parent.width
+                    text: "Test your connection"
+                  }
+
                   GuideBodyText {
                     width: parent.width
                     topPadding: Style.spacing.sm
-                    text: "Send a test message such as “Your verification code is 123456”. A generic notification should appear on the computer, and the code should appear in Oma2FA. Copied setup values use the same sensitive clipboard offer as codes and expire after about 60 seconds."
+                    text: "Send your iPhone a message such as “Your verification code is 123456”. A notification should appear on the computer. Click it to open Oma2FA and check that 123456 appears. If both happen, setup is complete."
+                  }
+                  GuideSectionHeading {
+                    width: parent.width
+                    text: "If the code doesn’t appear"
+                  }
+                  GuideBodyText {
+                    objectName: "guideTroubleshooting"
+                    width: parent.width
+                    text: "No notification? Check that Tailscale is connected on both devices and Phone webhook is Ready on the Connection page. In Shortcuts, check the URL, authorization value, and Run Immediately setting.\n\nNotification but no code? Send a fresh test message and open Oma2FA promptly. Codes expire automatically. Check that the JSON body uses the Shortcut Input variable and that Message Contains matches the message."
                   }
                 }
               }

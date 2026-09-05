@@ -552,6 +552,98 @@ ShellRoot {
     harness.expect(picker.transportDetailsPinned === false,
       "closing did not reset pinned transport details")
 
+    Qt.callLater(harness.runRefinementAssertions)
+  }
+
+  property real savedGuidePosition: 0
+  property real emptyHeight: 0
+
+  function runRefinementAssertions() {
+    picker.finishOpen()
+    harness.emptyHeight = picker.cardHeight
+    harness.expect(picker.cardHeight < 560, "empty picker should be compact")
+    harness.expect(harness.named("primaryHints").visible === false,
+      "empty picker must hide code action hints")
+    harness.expect(harness.named("removeShortcut").visible === false,
+      "empty picker must hide Remove")
+    harness.expect(harness.named("emptyStateTitle").text === "Ready for your next code",
+      "connected empty state should communicate readiness")
+    harness.expect(harness.named("emptyStateSetupButton").emphasized === false,
+      "connected empty state should not emphasize setup")
+    harness.expect(harness.named("transportStatusText").text === "2 connected",
+      "connections button should use its concise label")
+
+    fakeService.status = { ready: true, sources: {} }
+    harness.expect(harness.named("emptyStateTitle").text === "Connect your messages",
+      "unconfigured empty state should offer connection setup")
+    harness.named("emptyStateSetupButton").triggered()
+    harness.expect(picker.transportDetailsPinned && !picker.webhookSetupOpen,
+      "setup action should reveal all connection choices")
+    picker.transportDetailsPinned = false
+
+    fakeService.records = [1, 2, 3, 4].map(function(value) {
+      return { id: String(value), code: "123456", service: "Test", source: "test",
+        received_ms: Date.now(), expires_ms: Date.now() + 60000 }
+    })
+    picker.rebuildDisplay(false)
+    harness.expect(picker.cardHeight > harness.emptyHeight && picker.cardHeight <= 560,
+      "picker should grow with codes up to its height cap")
+    harness.expect(harness.named("primaryHints").visible === true,
+      "code actions should appear when there are codes")
+    fakeService.records = []
+    picker.rebuildDisplay(false)
+    picker.openWebhookSetup(true)
+    Qt.callLater(harness.runGuideNavigationAssertions)
+  }
+
+  function runGuideNavigationAssertions() {
+    harness.expect(harness.named("guideNavigation").visible,
+      "guide navigation must stay visible above scrolling content")
+    harness.named("guideNavigation-2").triggered()
+    harness.savedGuidePosition = harness.named("webhookSetupFlickable").contentY
+    harness.expect(harness.savedGuidePosition > 0,
+      "Configure request navigation should scroll to its section")
+    harness.expect(picker.currentGuideSection() === 2,
+      "navigation should identify the current section")
+    var pair = harness.named("fieldPair-authorization_header")
+    harness.expect(pair.columns === 2, "wide guide should pair header names and values")
+    pair.width = 360
+    harness.expect(pair.columns === 1, "narrow guide should stack paired fields")
+    pair.width = Qt.binding(function() { return pair.parent.width })
+    var screenshot = harness.named("shortcutConfigurationGuideImage")
+    var frame = harness.named("shortcutConfigurationGuideImage-frame")
+    var previewHeight = frame.height
+    harness.named("shortcutConfigurationGuideImage-expand").triggered()
+    harness.expect(screenshot.expanded && frame.height > previewHeight,
+      "enlarging a screenshot should reveal a larger readable image")
+    harness.named("shortcutConfigurationGuideImage-expand").triggered()
+    harness.expect(!screenshot.expanded, "screenshot should collapse again")
+    picker.showWebhookConnection()
+    picker.showWebhookGuide()
+    Qt.callLater(harness.runGuideReturnAssertions)
+  }
+
+  function runGuideReturnAssertions() {
+    harness.expect(Math.abs(harness.named("webhookSetupFlickable").contentY
+      - harness.savedGuidePosition) <= 1, "returning from Connection should preserve guide position")
+    harness.named("copyShortcutFieldButton-authorization_value").triggered()
+    Qt.callLater(harness.runCopyFeedbackAssertions)
+  }
+
+  function runCopyFeedbackAssertions() {
+    harness.expect(harness.named("copyShortcutFieldButton-authorization_value").label
+      === "Copied ✓", "successful copy should acknowledge the clicked field")
+    harness.expect(picker.webhookNotice === "", "successful field copy should not shift guide content")
+    harness.expect(harness.named("copyShortcutFieldButton-webhook_url").label === "Copy",
+      "copy feedback must not appear on unrelated fields")
+    picker.copyGuideField("webhook_url")
+    fakeService.requestFinished(16, "webhook_copy_setup_field", false, "Copy failed")
+    harness.expect(picker.copiedField === "" && picker.webhookNotice === "Copy failed",
+      "failed copy should show an error without claiming success")
+    harness.expect(harness.named("guideTroubleshooting").text.length > 0,
+      "final test step should include troubleshooting")
+    picker.closeWebhookSetup()
+    picker.close()
     console.log("OMA2FA_PICKER_STATUS_PASS")
     picker.destroy()
     Qt.exit(0)

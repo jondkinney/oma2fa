@@ -64,9 +64,18 @@ provides a separate **Copy** action for each value that must be typed or pasted.
 Token rotation requires confirmation and the phone must be updated afterward.
 
 After the webhook becomes ready, Oma2FA opens the **iPhone setup guide**
-automatically. You can also open it directly from the picker's empty state with
-**Open iPhone setup guide**, or from the connection screen with
-**Open iPhone setup guide →**.
+automatically after initial provisioning. You can also open it from the connected
+picker's empty state with **iPhone setup guide**, or from the connection screen
+with **iPhone setup guide →**. **Manage phone webhook…** always opens the
+connection controls.
+
+The guide has persistent navigation for Preparation, Create shortcut, Configure
+request, and Automation & test. Returning from the connection controls restores
+your reading position. Header and JSON names and values are grouped together;
+**Copy** changes to **Copied ✓** on the field you copied. Menu choices appear as
+arrow rows, and the Shortcut Input variable is highlighted separately. Use
+**Enlarge image** to inspect screenshots, then collapse them to continue. The
+final section includes a test message and troubleshooting steps.
 
 ### 4. Create the iPhone Shortcut and automation
 
@@ -443,7 +452,7 @@ that store whenever it opens. The standalone listener also publishes a minimal
 owner-only heartbeat so the picker can report it as an active transport. That
 heartbeat contains only a format version, timestamp, and random process-instance
 identifier; it contains no bind address, token, sender, message body, or code.
-Hover the transport count in the picker to preview each transport's derived
+Hover the connections button in the picker to preview each transport's derived
 health, or click it to keep the details open and enter the webhook manager.
 Arbitrary backend detail is never rendered in that disclosure. Token-copying
 happens entirely in the Python backend through an expiring sensitive clipboard
@@ -529,6 +538,13 @@ active when the picker opens, while the newest matching code remains the
 default Enter action. When a new code is accepted, Oma2FA also shows a generic
 desktop notification; it contains no code, sender, service, or message text.
 Click the notification to open the Oma2FA picker.
+
+The empty picker stays compact and shows **Ready for your next code** when a
+connection is active. Without an active connection, **Set up connections** opens
+the connection choices. The window grows as codes arrive, up to a fixed maximum;
+code action hints appear only when there are matching codes. The connections
+button shows the active count, and connections keep their fixed list order when
+toggled.
 
 - Type to filter by service, source, or code.
 - Press Down to enter the results at the newest code, or Up to enter at the
