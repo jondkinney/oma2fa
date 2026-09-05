@@ -18,6 +18,7 @@ MAX_SENDER_CHARS = 256
 MAX_MESSAGE_ID_CHARS = 1_024
 MAX_FUTURE_SKEW_SECONDS = 300
 MAX_BLUEFERRY_EVENTS = 32
+MAX_ADAPTER_MESSAGES = 200
 _BLUEFERRY_NUMERIC_SENDER = re.compile(r"^[+0-9(][0-9 ()\-.+]*$")
 
 
@@ -324,6 +325,71 @@ class Oma2FAService:
                     source="blueferry",
                     timestamp=received,
                     message_id=handle,
+                )
+            except ValueError:
+                counts["ignored"] += 1
+                continue
+            if result.accepted:
+                counts["accepted"] += 1
+            elif result.reason == "duplicate":
+                counts["duplicates"] += 1
+        return counts
+
+    def ingest_messages(self, source: str, messages: object) -> dict[str, int]:
+        """Ingest adapter-normalized messages: ``sender``, ``body``, ``timestamp``, ``message_id``.
+
+        Adapters reduce their transport's rows to this shape and drop outgoing
+        traffic before calling.  Bodies live only for the duration of this
+        call; the store receives a code or a seen-message hash, never the text.
+        A missing timestamp means "just now" so a transport without message
+        dates still feeds the TTL window instead of being ignored.
+        """
+
+        counts = {"examined": 0, "accepted": 0, "duplicates": 0, "ignored": 0}
+        if not isinstance(messages, Sequence) or isinstance(messages, (str, bytes)):
+            return counts
+        now = float(self._clock())
+        for index, raw_message in enumerate(messages):
+            if index >= MAX_ADAPTER_MESSAGES:
+                break
+            if not isinstance(raw_message, Mapping):
+                counts["ignored"] += 1
+                continue
+            body = raw_message.get("body")
+            if not isinstance(body, str) or not body or len(body) > MAX_BODY_CHARS:
+                counts["ignored"] += 1
+                continue
+            raw_timestamp = raw_message.get("timestamp")
+            try:
+                received = (
+                    now
+                    if raw_timestamp is None or raw_timestamp == ""
+                    else parse_timestamp(raw_timestamp, default=now)
+                )
+            except ValueError:
+                counts["ignored"] += 1
+                continue
+            if received <= now - self.store.ttl_seconds:
+                counts["ignored"] += 1
+                continue
+            sender = raw_message.get("sender")
+            if not isinstance(sender, str) or len(sender) > MAX_SENDER_CHARS:
+                sender = ""
+            message_id = raw_message.get("message_id")
+            if (
+                not isinstance(message_id, str)
+                or not message_id
+                or len(message_id) > MAX_MESSAGE_ID_CHARS
+            ):
+                message_id = None
+            counts["examined"] += 1
+            try:
+                result = self.ingest(
+                    sender=sender,
+                    body=body,
+                    source=source,
+                    timestamp=received,
+                    message_id=message_id,
                 )
             except ValueError:
                 counts["ignored"] += 1

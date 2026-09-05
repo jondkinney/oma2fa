@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import ipaddress
 import os
 import secrets
@@ -8,11 +7,12 @@ import shlex
 import shutil
 import stat
 import subprocess
-import tempfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
+from .util import atomic_write, ensure_directory
+from .util import config_root as default_config_root
 from .webhook import DEFAULT_WEBHOOK_PORT, WebhookConfig, WebhookConfigError
 
 SERVICE_NAME = "oma2fa-webhook.service"
@@ -33,11 +33,6 @@ _SHORTCUT_COPY_VALUES = {
 
 class WebhookSetupError(RuntimeError):
     pass
-
-
-def _config_root(environ: Mapping[str, str]) -> Path:
-    configured = environ.get("XDG_CONFIG_HOME", "").strip()
-    return Path(configured) if configured else Path.home() / ".config"
 
 
 def _decode_environment_value(value: str) -> str:
@@ -69,7 +64,7 @@ class WebhookManager:
         self._environ = environ
         self._run = run
         self._which = which
-        root = config_root or _config_root(environ)
+        root = config_root or default_config_root(environ)
         self.settings_dir = root / "oma2fa"
         self.environment_path = self.settings_dir / "webhook.env"
         self.token_path = self.settings_dir / "webhook-token"
@@ -242,31 +237,11 @@ class WebhookManager:
 
     @staticmethod
     def _ensure_directory(path: Path, mode: int) -> None:
-        path.mkdir(parents=True, exist_ok=True, mode=mode)
-        if path.is_symlink() or not path.is_dir() or path.stat().st_uid != os.getuid():
-            raise WebhookSetupError("A webhook configuration directory is unsafe")
-        path.chmod(mode)
+        ensure_directory(path, mode, error=WebhookSetupError, label="webhook configuration")
 
     @staticmethod
     def _atomic_write(path: Path, content: bytes, mode: int) -> None:
-        if path.is_symlink():
-            raise WebhookSetupError("A webhook configuration file is unsafe")
-        temporary_name = ""
-        try:
-            descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-            os.fchmod(descriptor, mode)
-            with os.fdopen(descriptor, "wb") as handle:
-                handle.write(content)
-                handle.flush()
-                os.fsync(handle.fileno())
-            os.replace(temporary_name, path)
-            temporary_name = ""
-        except OSError as error:
-            raise WebhookSetupError("Could not write the webhook configuration") from error
-        finally:
-            if temporary_name:
-                with contextlib.suppress(OSError):
-                    os.unlink(temporary_name)
+        atomic_write(path, content, mode, error=WebhookSetupError, label="webhook configuration")
 
     def _install_unit(self) -> None:
         try:

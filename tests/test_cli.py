@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import os
@@ -9,6 +10,7 @@ import sys
 import tempfile
 import time
 import unittest
+import unittest.mock
 from pathlib import Path
 from unittest.mock import patch
 
@@ -139,3 +141,43 @@ class CliTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SourcesCommandTests(unittest.TestCase):
+    def test_sources_subcommand_lists_and_persists_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            environ = {"XDG_CONFIG_HOME": temporary}
+            with unittest.mock.patch.dict(os.environ, environ, clear=False):
+                buffer = io.StringIO()
+                with contextlib.redirect_stdout(buffer):
+                    self.assertEqual(main(["sources"]), 0)
+                listed = json.loads(buffer.getvalue())
+                self.assertEqual(listed["path"], str(Path(temporary) / "oma2fa" / "sources.json"))
+                self.assertEqual(listed["sources"]["blueferry"], {"enabled": True})
+                self.assertEqual(listed["sources"]["blip"], {"enabled": True})
+                self.assertEqual(listed["sources"]["tether"], {"enabled": False})
+                self.assertFalse(Path(listed["path"]).exists())
+
+                buffer = io.StringIO()
+                with contextlib.redirect_stdout(buffer):
+                    self.assertEqual(
+                        main(["sources", "--disable", "blip", "--enable", "tether"]), 0
+                    )
+                changed = json.loads(buffer.getvalue())
+                self.assertEqual(changed["sources"]["blip"], {"enabled": False})
+                self.assertEqual(changed["sources"]["tether"], {"enabled": True})
+                path = Path(changed["path"])
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(path.parent.stat().st_mode & 0o777, 0o700)
+                self.assertEqual(
+                    json.loads(path.read_text())["sources"],
+                    {"blip": {"enabled": False}, "tether": {"enabled": True}},
+                )
+
+    def test_sources_subcommand_rejects_unknown_names(self) -> None:
+        with (
+            contextlib.redirect_stderr(io.StringIO()),
+            self.assertRaises(SystemExit) as raised,
+        ):
+            main(["sources", "--enable", "carrier-pigeon"])
+        self.assertEqual(raised.exception.code, 2)

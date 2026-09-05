@@ -28,6 +28,9 @@ Item {
   property bool webhookBusy: false
   property bool tokenRotationArmed: false
   property string webhookNotice: ""
+  // Source ids with a toggle request in flight, and the last toggle failure.
+  property var sourceToggleBusy: ({})
+  property string sourceNotice: ""
 
   property color background: Color.menu.background
   property color foreground: Color.menu.text
@@ -201,7 +204,6 @@ Item {
     root.transportDetailsPinned = false
     root.webhookSetupOpen = true
     root.webhookGuideOpen = showGuide === true
-      || root.webhookState().configured === true
     root.tokenRotationArmed = false
     root.webhookNotice = ""
     if (root.service && typeof root.service.requestWebhookStatus === "function") {
@@ -258,6 +260,34 @@ Item {
     }
   }
 
+  function beginSourceToggle(sourceId, requestId) {
+    if (requestId < 0) {
+      root.sourceNotice = "The local bridge is unavailable."
+      return
+    }
+    var next = ({})
+    for (var key in root.sourceToggleBusy) next[key] = root.sourceToggleBusy[key]
+    next[String(sourceId)] = true
+    root.sourceToggleBusy = next
+    root.sourceNotice = ""
+  }
+
+  function toggleSource(entry) {
+    if (!entry || !root.service) return
+    var id = String(entry.id || "")
+    if (!id || root.sourceToggleBusy[id] === true) return
+    var enable = entry.enabled !== true
+    if (id === "webhook") {
+      // The webhook is a systemd unit with its own manager; an unconfigured
+      // one answers "Set up the phone webhook first" through the notice.
+      if (typeof root.service.setWebhookEnabled !== "function") return
+      root.beginSourceToggle(id, root.service.setWebhookEnabled(enable))
+      return
+    }
+    if (typeof root.service.setSourceEnabled !== "function") return
+    root.beginSourceToggle(id, root.service.setSourceEnabled(id, enable))
+  }
+
   function statusState() {
     if (!root.service) return "unavailable"
     if (root.service.bridgeAlive !== true) return "reconnecting"
@@ -281,6 +311,8 @@ Item {
   function transportDisplayName(name) {
     var sourceName = String(name || "").toLowerCase()
     if (sourceName === "blueferry") return "BlueFerry"
+    if (sourceName === "blip") return "Blip (iMessage)"
+    if (sourceName === "tether") return "Tether"
     if (sourceName === "webhook") return "Phone webhook"
     if (sourceName === "kdeconnect") return "KDE Connect"
 
@@ -309,6 +341,13 @@ Item {
     if (detail === "authorization-required") return "Authorization needed"
     if (detail === "map-connection-refused") return "Messages unavailable"
     if (detail === "status unavailable") return "Status unavailable"
+    if (detail === "not installed") return "Not installed"
+    if (detail === "not configured") return "Not configured"
+    if (detail === "hook not configured") return "Hook not configured"
+    if (detail === "subscribing" || detail === "connecting") return "Connecting"
+    if (detail === "daemon unavailable" || detail === "daemon connection lost")
+      return "Daemon offline"
+    if (detail === "phone not connected") return "Phone not connected"
     if (detail === "history unavailable" || detail === "degraded") return "Degraded"
     if (detail === "could not start" || detail === "message processing failed")
       return "Error"
@@ -322,9 +361,11 @@ Item {
     var health = entry ? String(entry.health || "") : ""
     if (health === "Not responding" || health === "SMS unavailable"
         || health === "Messages unavailable" || health === "Status unavailable"
-        || health === "Error" || health === "Degraded") return "error"
+        || health === "Error" || health === "Degraded" || health === "Daemon offline")
+      return "error"
     if (health === "Starting" || health === "Checking messages"
-        || health === "Reconnecting" || health === "Authorization needed")
+        || health === "Reconnecting" || health === "Authorization needed"
+        || health === "Connecting")
       return "pending"
     return "inactive"
   }
@@ -342,7 +383,10 @@ Item {
         id: sourceName,
         name: root.transportDisplayName(sourceName),
         active: root.sourceIsActiveTransport(sourceName, source),
-        health: root.transportHealthLabel(source)
+        health: root.transportHealthLabel(source),
+        enabled: source.enabled === true,
+        // Every transport that reports an enabled flag can be switched here.
+        toggleable: source.enabled === true || source.enabled === false
       })
     }
 
@@ -359,9 +403,8 @@ Item {
         appendEntry(names[keyIndex], sources[names[keyIndex]])
     }
 
-    var order = { blueferry: 0, webhook: 1, kdeconnect: 2 }
+    var order = { blueferry: 0, blip: 1, tether: 2, webhook: 3, kdeconnect: 4 }
     entries.sort(function(left, right) {
-      if (left.active !== right.active) return left.active ? -1 : 1
       var leftOrder = order[left.id] !== undefined ? order[left.id] : 100
       var rightOrder = order[right.id] !== undefined ? order[right.id] : 100
       if (leftOrder !== rightOrder) return leftOrder - rightOrder
@@ -646,6 +689,11 @@ Item {
     ignoreUnknownSignals: true
     function onRecordsChanged() { root.rebuildDisplay(true) }
     function onRequestFinished(requestId, method, ok, message) {
+      if (method === "source_set_enabled" || method === "webhook_set_enabled") {
+        root.sourceToggleBusy = ({})
+        root.sourceNotice = ok ? "" : String(message || "The source could not be changed.")
+      }
+      if (method === "source_set_enabled") return
       if (String(method).indexOf("webhook_") !== 0) return
       root.webhookBusy = false
       if (!ok) {
@@ -1314,7 +1362,9 @@ Item {
                     Text {
                       id: transportHealthLabel
                       objectName: "transportHealth-" + String(transportRow.modelData.id)
-                      anchors.right: parent.right
+                      anchors.right: transportToggle.visible
+                        ? transportToggle.left : parent.right
+                      anchors.rightMargin: transportToggle.visible ? Style.spacing.sm : 0
                       anchors.verticalCenter: parent.verticalCenter
                       text: String(transportRow.modelData.health)
                       textFormat: Text.PlainText
@@ -1323,7 +1373,51 @@ Item {
                       font.family: root.fontFamily
                       font.pixelSize: Style.font.caption
                     }
+
+                    ToggleSwitch {
+                      id: transportToggle
+                      objectName: "transportToggle-" + String(transportRow.modelData.id)
+                      visible: transportRow.modelData.toggleable === true
+                      anchors.right: parent.right
+                      anchors.verticalCenter: parent.verticalCenter
+                      trackHeight: Style.space(16)
+                      cursorRing: false
+                      checked: transportRow.modelData.enabled === true
+                      busy: root.sourceToggleBusy[String(transportRow.modelData.id)] === true
+                      foreground: root.foreground
+                      accent: Color.accent
+                      hasCursor: activeFocus
+                      activeFocusOnTab: visible
+                      onToggled: root.toggleSource(transportRow.modelData)
+
+                      Accessible.role: Accessible.CheckBox
+                      Accessible.name: String(transportRow.modelData.name) + " enabled"
+                      Accessible.checked: checked
+                      Accessible.focusable: visible
+                      Accessible.onPressAction: if (!busy) toggled()
+
+                      Keys.onPressed: function(event) {
+                        if (event.key === Qt.Key_Space || event.key === Qt.Key_Return
+                            || event.key === Qt.Key_Enter) {
+                          if (!transportToggle.busy) transportToggle.toggled()
+                          event.accepted = true
+                        }
+                      }
+                    }
                   }
+                }
+
+                Text {
+                  objectName: "sourceNotice"
+                  width: parent.width
+                  visible: root.sourceNotice !== ""
+                  text: root.sourceNotice
+                  textFormat: Text.PlainText
+                  wrapMode: Text.WordWrap
+                  color: Color.urgent
+                  opacity: 0.9
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.caption
                 }
 
                 SetupButton {

@@ -256,6 +256,14 @@ Item {
     return root.sendRequest("webhook_set_enabled", { enabled: enabled === true })
   }
 
+  // Message sources other than the webhook (BlueFerry, Blip, Tether) are
+  // toggled through the bridge, which persists the choice in sources.json.
+  function setSourceEnabled(sourceId, enabled) {
+    var id = String(sourceId || "")
+    if (!id) return -1
+    return root.sendRequest("source_set_enabled", { source: id, enabled: enabled === true })
+  }
+
   function copyWebhookEndpoint() {
     return root.sendRequest("webhook_copy_endpoint", {})
   }
@@ -324,6 +332,8 @@ Item {
       root.responseSnapshot(result)
     } else if (method === "refresh") {
       root.responseSnapshot(result)
+      if (result && result.status !== undefined) root.applyStatus(result.status)
+    } else if (method === "source_set_enabled") {
       if (result && result.status !== undefined) root.applyStatus(result.status)
     } else if (method === "delete") {
       if (!root.responseSnapshot(result) && pending && pending.args)

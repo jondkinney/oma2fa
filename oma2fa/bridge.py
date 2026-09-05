@@ -7,9 +7,14 @@ from collections.abc import Mapping
 from typing import Any, TextIO
 
 from .activation import ActivationError, Activator
+from .blip import BlipHookSource
 from .blueferry import BlueFerryAdapter
 from .service import Oma2FAService
+from .settings import SettingsError, SourceSettings
+from .sources import DEFAULT_SOURCE_ENABLED, SourceAdapter
 from .store import StoreError
+from .tether import TetherAdapter
+from .util import clean_source
 from .webhook import (
     WEBHOOK_HEARTBEAT_MAX_AGE_SECONDS,
     WebhookConfig,
@@ -48,8 +53,12 @@ class JsonBridge:
         *,
         output: TextIO = sys.stdout,
         activator: Activator | None = None,
-        blueferry: BlueFerryAdapter | None = None,
+        blueferry: SourceAdapter | None = None,
         enable_blueferry: bool = True,
+        blip: SourceAdapter | None = None,
+        tether: SourceAdapter | None = None,
+        source_settings: SourceSettings | None = None,
+        source_overrides: Mapping[str, bool] | None = None,
         webhook_config: WebhookConfig | None = None,
         webhook_manager: WebhookManager | None = None,
     ) -> None:
@@ -59,7 +68,6 @@ class JsonBridge:
         self.webhook_manager = webhook_manager or WebhookManager(
             copy_secret=self.activator.copy
         )
-        self.enable_blueferry = enable_blueferry
         self.webhook_config = webhook_config or WebhookConfig()
         self.webhook: WebhookServer | None = None
         self._output_lock = threading.Lock()
@@ -68,18 +76,50 @@ class JsonBridge:
         self._maintenance: threading.Thread | None = None
         self._last_record_ids: tuple[str, ...] = ()
         self._webhook_source_status: dict[str, Any] | None = None
-        self._blueferry_source_status: dict[str, Any] = {
-            "connected": False,
-            "events_available": None,
-            "degraded": True,
-            "detail": "starting",
+
+        self.source_settings = source_settings or SourceSettings(defaults=DEFAULT_SOURCE_ENABLED)
+        # CLI pins win over the settings file for the life of this process;
+        # an explicit picker toggle still applies (the user just asked for it).
+        overrides = {
+            clean_source(name): bool(value) for name, value in (source_overrides or {}).items()
         }
-        self.blueferry = blueferry or BlueFerryAdapter(
+        if not enable_blueferry:
+            overrides.setdefault("blueferry", False)
+        self._overrides = overrides
+
+        self.blueferry: SourceAdapter = blueferry or BlueFerryAdapter(
             on_threads=self._on_blueferry_threads,
             on_status=self._on_blueferry_status,
             on_events=self._on_blueferry_events,
         )
+        self.blip: SourceAdapter = blip or BlipHookSource(on_status=self._on_blip_status)
+        self.tether: SourceAdapter = tether or TetherAdapter(
+            on_messages=self._on_tether_messages,
+            on_status=self._on_tether_status,
+        )
+        self.adapters: dict[str, SourceAdapter] = {
+            "blueferry": self.blueferry,
+            "blip": self.blip,
+            "tether": self.tether,
+        }
+        self._desired: dict[str, bool] = {
+            name: overrides.get(name, self.source_settings.enabled(name)) for name in self.adapters
+        }
+        self._active: dict[str, bool] = dict.fromkeys(self.adapters, False)
+        # Only transports with a connection concept seed ``connected``; the
+        # picker treats its presence as "active means connected".
+        self._source_status: dict[str, dict[str, Any]] = {
+            name: {"running": False, "detail": "starting"} for name in self.adapters
+        }
+        self._source_status["blueferry"].update(
+            {"connected": False, "events_available": None, "degraded": True}
+        )
+        self._source_status["tether"]["connected"] = False
         self.service.set_on_change(self._changed)
+
+    @property
+    def enable_blueferry(self) -> bool:
+        return self._desired["blueferry"]
 
     def emit(self, payload: Mapping[str, Any]) -> None:
         # ASCII escaping also makes lone-surrogate input safe to return as JSON
@@ -107,18 +147,58 @@ class JsonBridge:
         self.emit_snapshot()
         self.emit_status()
 
-    def _update_blueferry_source(self, **status: Any) -> None:
-        """Merge independent BlueFerry health and ingestion observations."""
+    # ------------------------------------------------------------ sources
+
+    def _update_source(self, name: str, **status: Any) -> None:
+        """Merge independent health and ingestion observations for one source."""
 
         with self._publish_lock:
-            self._blueferry_source_status.update(status)
-            self.service.update_source_status(
-                "blueferry", **dict(self._blueferry_source_status)
-            )
+            current = self._source_status[name]
+            current.update(status)
+            current["enabled"] = self._desired[name]
+            self.service.update_source_status(name, **dict(current))
+
+    def _publish_disabled(self, name: str) -> None:
+        self._update_source(
+            name,
+            available=self.adapters[name].installed,
+            running=False,
+            **({"connected": False} if "connected" in self._source_status[name] else {}),
+            detail="disabled",
+        )
+
+    def _apply_source(self, name: str) -> None:
+        adapter = self.adapters[name]
+        desired = self._desired[name]
+        if desired and not self._active[name]:
+            self._active[name] = True
+            # List the source before its helper answers so every transport
+            # shows up in the picker from the first status event.
+            self._update_source(name, available=adapter.installed, detail="starting")
+            adapter.start()
+        elif not desired and self._active[name]:
+            self._active[name] = False
+            adapter.stop()
+            self._publish_disabled(name)
+        elif not desired:
+            self._publish_disabled(name)
+
+    def _apply_settings(self) -> bool:
+        """Pick up ``sources.json`` edits made by the CLI while the bridge runs."""
+
+        if not self.source_settings.reload():
+            return False
+        for name in self.adapters:
+            if name not in self._overrides:
+                self._desired[name] = self.source_settings.enabled(name)
+        for name in self.adapters:
+            self._apply_source(name)
+        return True
 
     def _on_blueferry_threads(self, threads: object) -> None:
         counts = self.service.ingest_blueferry_threads(threads)
-        self._update_blueferry_source(
+        self._update_source(
+            "blueferry",
             available=True,
             running=True,
             examined=counts["examined"],
@@ -132,7 +212,8 @@ class JsonBridge:
 
     def _on_blueferry_events(self, events: object) -> None:
         counts = self.service.ingest_blueferry_events(events)
-        self._update_blueferry_source(
+        self._update_source(
+            "blueferry",
             available=True,
             running=True,
             examined=counts["examined"],
@@ -144,8 +225,60 @@ class JsonBridge:
         self.emit_status()
 
     def _on_blueferry_status(self, status: Mapping[str, Any]) -> None:
-        self._update_blueferry_source(**dict(status))
+        self._update_source("blueferry", **dict(status))
         self.emit_status()
+
+    def _on_adapter_messages(self, name: str, messages: object) -> None:
+        counts = self.service.ingest_messages(name, messages)
+        self._update_source(
+            name,
+            available=True,
+            running=True,
+            examined=counts["examined"],
+            accepted=counts["accepted"],
+        )
+        self.emit_snapshot()
+        self.emit_status()
+
+    def _on_blip_status(self, status: Mapping[str, Any]) -> None:
+        self._update_source("blip", **dict(status))
+        self.emit_status()
+
+    def _on_tether_messages(self, messages: object) -> None:
+        self._on_adapter_messages("tether", messages)
+
+    def _on_tether_status(self, status: Mapping[str, Any]) -> None:
+        self._update_source("tether", **dict(status))
+        self.emit_status()
+
+    def _source_entries(self) -> list[dict[str, Any]]:
+        return [
+            {
+                "id": name,
+                "enabled": self._desired[name],
+                "available": adapter.installed,
+                "running": self._active[name],
+                "pinned": name in self._overrides,
+            }
+            for name, adapter in self.adapters.items()
+        ]
+
+    # ------------------------------------------------------------ webhook
+
+    def _publish_webhook_setup(self, state: dict[str, Any]) -> dict[str, Any]:
+        """Publish manager changes before acknowledging the UI request."""
+
+        if not self.webhook_config.enabled:
+            enabled = state.get("enabled") is True
+            running = state.get("running") is True
+            self._set_webhook_source(
+                available=True,
+                enabled=enabled,
+                running=running,
+                detail="ready" if running else "not responding" if enabled else "disabled",
+            )
+            self.emit_status()
+        return state
 
     def _set_webhook_source(self, **status: Any) -> bool:
         next_status = dict(status)
@@ -220,14 +353,12 @@ class JsonBridge:
                 detail="could not start",
             )
 
+    # ---------------------------------------------------------- lifecycle
+
     def start(self) -> None:
         self._start_webhook()
-        if self.enable_blueferry:
-            self.blueferry.start()
-        else:
-            self._update_blueferry_source(
-                available=False, running=False, connected=False, detail="disabled"
-            )
+        for name in self.adapters:
+            self._apply_source(name)
         self.emit_status()
         self.emit_snapshot()
         self._maintenance = threading.Thread(
@@ -238,6 +369,7 @@ class JsonBridge:
         self._maintenance.start()
 
     def _maintain_once(self) -> None:
+        settings_changed = self._apply_settings()
         with self._publish_lock:
             webhook_changed = self._refresh_external_webhook_status()
             snapshot = self.service.snapshot()
@@ -246,10 +378,11 @@ class JsonBridge:
             if records_changed:
                 self._last_record_ids = record_ids
                 self.emit({"event": "snapshot", "data": snapshot})
-            if records_changed or webhook_changed:
+            if records_changed or webhook_changed or settings_changed:
                 self.emit_status()
-        if self.enable_blueferry:
-            self.blueferry.maintain()
+        for name, adapter in self.adapters.items():
+            if self._active[name]:
+                adapter.maintain()
 
     def _maintain(self) -> None:
         while not self._stop.wait(MAINTENANCE_SECONDS):
@@ -260,14 +393,41 @@ class JsonBridge:
             self._refresh_external_webhook_status()
             return self.service.status()
         if method == "refresh":
-            requested = self.enable_blueferry and self.blueferry.refresh()
+            requested: dict[str, bool] = {}
+            for name, adapter in self.adapters.items():
+                if not self._desired[name]:
+                    continue
+                self._active[name] = True
+                requested[name] = bool(adapter.refresh())
             self._refresh_external_webhook_status()
             snapshot = self.emit_snapshot()
             self.emit_status()
             return {
                 "count": len(snapshot["codes"]),
-                "blueferry_requested": bool(requested),
+                "blueferry_requested": requested.get("blueferry", False),
+                "requested": requested,
             }
+        if method == "sources":
+            return {"sources": self._source_entries()}
+        if method == "source_set_enabled":
+            name = clean_source(_text(args, "source"))
+            enabled = args.get("enabled")
+            if not isinstance(enabled, bool):
+                raise RequestError("enabled must be a boolean")
+            if name == "webhook":
+                state = self._publish_webhook_setup(self.webhook_manager.set_enabled(enabled))
+                return {"source": name, "enabled": state["enabled"],
+                        "status": self.service.status()}
+            if name not in self.adapters:
+                raise RequestError("unknown source")
+            try:
+                self.source_settings.set_enabled(name, enabled)
+            except SettingsError as error:
+                raise RequestError(str(error)) from error
+            self._desired[name] = enabled
+            self._apply_source(name)
+            status = self.emit_status()
+            return {"source": name, "enabled": enabled, "status": status}
         if method == "activate":
             record_id = _text(args, "record_id")
             paste = args.get("paste", False)
@@ -292,17 +452,17 @@ class JsonBridge:
         if method == "clear":
             return {"cleared": self.service.clear()}
         if method == "webhook_status":
-            return self.webhook_manager.status()
+            return self._publish_webhook_setup(self.webhook_manager.status())
         if method == "webhook_configure_tailscale":
             raw_port = args.get("port", 8765)
             if isinstance(raw_port, bool) or not isinstance(raw_port, int):
                 raise RequestError("port must be an integer")
-            return self.webhook_manager.configure_tailscale(raw_port)
+            return self._publish_webhook_setup(self.webhook_manager.configure_tailscale(raw_port))
         if method == "webhook_set_enabled":
             enabled = args.get("enabled")
             if not isinstance(enabled, bool):
                 raise RequestError("enabled must be a boolean")
-            return self.webhook_manager.set_enabled(enabled)
+            return self._publish_webhook_setup(self.webhook_manager.set_enabled(enabled))
         if method == "webhook_copy_endpoint":
             return self.webhook_manager.copy_endpoint()
         if method == "webhook_copy_token":
@@ -380,8 +540,10 @@ class JsonBridge:
         if self.webhook is not None:
             self.webhook.stop()
             self.webhook = None
-        if self.enable_blueferry:
-            self.blueferry.stop()
+        for name, adapter in self.adapters.items():
+            if self._active[name]:
+                self._active[name] = False
+                adapter.stop()
         self.activator.close()
 
 

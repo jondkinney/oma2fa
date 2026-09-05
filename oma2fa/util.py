@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import contextlib
 import math
 import os
 import re
 import tempfile
 import unicodedata
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -130,3 +132,45 @@ def runtime_directory(explicit: str | os.PathLike[str] | None = None) -> Path:
 def clean_source(value: str, *, fallback: str = "manual") -> str:
     cleaned = _SAFE_SOURCE.sub("-", normalize_text(value)).strip("-./:")
     return (cleaned or fallback)[:48]
+
+
+def config_root(environ: Mapping[str, str] | None = None) -> Path:
+    """Return ``$XDG_CONFIG_HOME`` or ``~/.config``."""
+
+    env = os.environ if environ is None else environ
+    configured = env.get("XDG_CONFIG_HOME", "").strip()
+    return Path(configured) if configured else Path.home() / ".config"
+
+
+def ensure_directory(path: Path, mode: int, *, error: type[Exception], label: str) -> None:
+    """Create a private, user-owned directory or raise ``error``."""
+
+    path.mkdir(parents=True, exist_ok=True, mode=mode)
+    if path.is_symlink() or not path.is_dir() or path.stat().st_uid != os.getuid():
+        raise error(f"A {label} directory is unsafe")
+    path.chmod(mode)
+
+
+def atomic_write(
+    path: Path, content: bytes, mode: int, *, error: type[Exception], label: str
+) -> None:
+    """Replace ``path`` atomically with ``content`` at ``mode`` or raise ``error``."""
+
+    if path.is_symlink():
+        raise error(f"A {label} file is unsafe")
+    temporary_name = ""
+    try:
+        descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+        os.fchmod(descriptor, mode)
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary_name, path)
+        temporary_name = ""
+    except OSError as exc:
+        raise error(f"Could not write the {label}") from exc
+    finally:
+        if temporary_name:
+            with contextlib.suppress(OSError):
+                os.unlink(temporary_name)

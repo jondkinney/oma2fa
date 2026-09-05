@@ -34,6 +34,12 @@ class NewCodeNotifier:
                 "-t",
                 "6000",
             ]
+            shell = self._which("omarchy-shell")
+            if shell:
+                command.extend([
+                    "--exec", shell, "shell", "summon",
+                    "io.github.jondkinney.oma2fa", "{}",
+                ])
         else:
             executable = self._which("notify-send")
             if not executable:

@@ -28,7 +28,7 @@ class Harness:
 
 class NotificationTests(unittest.TestCase):
     def test_prefers_omarchy_notification_with_generic_content(self) -> None:
-        harness = Harness({"omarchy-notification-send", "notify-send"})
+        harness = Harness({"omarchy-notification-send", "notify-send", "omarchy-shell"})
         harness.notifier().notify()
 
         self.assertEqual(len(harness.calls), 1)
@@ -40,6 +40,16 @@ class NotificationTests(unittest.TestCase):
         self.assertNotIn("123456", " ".join(arguments))
         self.assertFalse(options["check"])
         self.assertEqual(options["timeout"], 2)
+        self.assertEqual(arguments[arguments.index("--exec"):], [
+            "--exec", "/fixture/omarchy-shell", "shell", "summon",
+            "io.github.jondkinney.oma2fa", "{}",
+        ])
+
+    def test_missing_shell_still_shows_notification(self) -> None:
+        harness = Harness({"omarchy-notification-send"})
+        harness.notifier().notify()
+        self.assertEqual(len(harness.calls), 1)
+        self.assertNotIn("--exec", harness.calls[0][0])
 
     def test_falls_back_to_notify_send(self) -> None:
         harness = Harness({"notify-send"})

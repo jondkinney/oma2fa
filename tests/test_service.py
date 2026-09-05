@@ -242,3 +242,49 @@ class ServiceTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AdapterIngestTests(ServiceTests):
+    def test_ingest_messages_reduces_normalized_rows(self) -> None:
+        now = self.clock.value
+        counts = self.service.ingest_messages(
+            "blip",
+            [
+                {
+                    "sender": "Example",
+                    "body": "Private prose. Your verification code is 123456",
+                    "timestamp": None,
+                    "message_id": "1",
+                },
+                {
+                    "sender": "Friend",
+                    "body": "no secret here",
+                    "timestamp": now - 5,
+                    "message_id": "2",
+                },
+                {
+                    "sender": "Old",
+                    "body": "code 654321",
+                    "timestamp": now - 100_000,
+                    "message_id": "3",
+                },
+                {"sender": "Bad", "body": "code 111111", "timestamp": "never", "message_id": "4"},
+                "not a mapping",
+                {"sender": None, "body": "", "timestamp": None, "message_id": "5"},
+            ],
+        )
+        self.assertEqual(counts, {"examined": 2, "accepted": 1, "duplicates": 0, "ignored": 4})
+        records = self.store.list()
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].code, "123456")
+        self.assertEqual(records[0].source, "blip")
+        state_text = self.store.path.read_text()
+        self.assertNotIn("Private prose", state_text)
+        self.assertNotIn("no secret here", state_text)
+
+        again = self.service.ingest_messages(
+            "blip",
+            [{"sender": "Example", "body": "code 123456", "timestamp": None, "message_id": "1"}],
+        )
+        self.assertEqual(again["duplicates"], 1)
+        self.assertEqual(self.service.ingest_messages("blip", "nope")["examined"], 0)

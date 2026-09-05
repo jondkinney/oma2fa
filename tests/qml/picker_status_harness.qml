@@ -240,6 +240,98 @@ ShellRoot {
       "unpinning did not hide transport details")
     harness.expect(harness.named("manageWebhookButton").Accessible.focusable === true,
       "webhook manager entry must be keyboard accessible")
+    Qt.callLater(harness.runToggleAssertions)
+  }
+
+  function runToggleAssertions() {
+    // Switches live inside the popover, so their effective visibility needs
+    // it shown. A legacy status without an enabled flag gets no switch; the
+    // webhook, which reports one, does — and it reflects the flag.
+    picker.transportDetailsPinned = true
+    harness.expect(harness.named("transportToggle-blueferry").visible === false,
+      "a source without an enabled flag must not offer a switch")
+    var webhookToggle = harness.named("transportToggle-webhook")
+    harness.expect(webhookToggle.visible === true, "webhook row is missing its switch")
+    harness.expect(webhookToggle.checked === true, "webhook switch must reflect enabled")
+    harness.expect(webhookToggle.Accessible.role === Accessible.CheckBox,
+      "source switches must be exposed as check boxes")
+    harness.expect(String(webhookToggle.Accessible.name) === "Phone webhook enabled",
+      "webhook switch has the wrong accessible name")
+
+    fakeService.status = {
+      ready: true,
+      sources: {
+        manual: { available: true, detail: "ready" },
+        blueferry: { available: false, enabled: false, running: false, detail: "disabled" },
+        blip: { available: true, enabled: true, running: true, detail: "ready" },
+        tether: { available: true, enabled: false, running: false, detail: "disabled" },
+        webhook: { available: true, enabled: true, running: true }
+      }
+    }
+    var entries = picker.transportEntries(fakeService.status)
+    harness.expectEntry(entries, "blip", "Blip (iMessage)", true, "Ready")
+    harness.expectEntry(entries, "tether", "Tether", false, "Disabled")
+    harness.expectEntry(entries, "blueferry", "BlueFerry", false, "Unavailable")
+    harness.expect(entries.map(function(entry) { return entry.id }).join(",")
+      === "blueferry,blip,tether,webhook",
+      "connections must retain their fixed order regardless of active state")
+    harness.expect(picker.activeTransportSummary(fakeService.status)
+      === "Active transports: Blip (iMessage), Phone webhook",
+      "transport summary must name the new sources")
+    Qt.callLater(harness.runToggleInteractionAssertions)
+  }
+
+  function runToggleInteractionAssertions() {
+    var blipToggle = harness.named("transportToggle-blip")
+    var tetherToggle = harness.named("transportToggle-tether")
+    harness.expect(blipToggle.visible === true && blipToggle.checked === true,
+      "Blip switch must be visible and on")
+    harness.expect(tetherToggle.visible === true && tetherToggle.checked === false,
+      "Tether switch must be visible and off")
+    harness.expect(String(harness.named("transportHealth-blip").text) === "Ready",
+      "Blip row has the wrong health")
+    harness.expect(harness.named("sourceNotice").visible === false,
+      "no source notice should show before a failure")
+
+    tetherToggle.toggled()
+    harness.expect(JSON.stringify(fakeService.sourceRequests) === JSON.stringify([["tether", true]]),
+      "toggling Tether must ask the bridge to enable it")
+    harness.expect(picker.sourceToggleBusy.tether === true,
+      "a toggle request must mark its row busy")
+    harness.expect(tetherToggle.busy === true, "busy switch must be marked busy")
+    // A busy switch swallows further clicks until the bridge answers.
+    tetherToggle.toggled()
+    harness.expect(fakeService.sourceRequests.length === 1,
+      "a busy switch must not send a second request")
+
+    harness.named("transportToggle-webhook").toggled()
+    harness.expect(JSON.stringify(fakeService.webhookToggleRequests) === JSON.stringify([false]),
+      "toggling the webhook must go through its own manager")
+    Qt.callLater(harness.runToggleCompletionAssertions)
+  }
+
+  function runToggleCompletionAssertions() {
+    harness.expect(picker.sourceToggleBusy.tether === undefined,
+      "the bridge answer must clear the busy marker")
+    harness.expect(picker.sourceNotice === "", "a successful toggle leaves no notice")
+    fakeService.requestFinished(18, "source_set_enabled", false, "unknown source")
+    harness.expect(picker.sourceNotice === "unknown source",
+      "a failed toggle must surface the bridge's message")
+    harness.expect(harness.named("sourceNotice").visible === true,
+      "the source notice must render when set")
+    harness.expect(String(harness.named("sourceNotice").text) === "unknown source",
+      "the source notice shows the wrong text")
+    picker.sourceNotice = ""
+    picker.transportDetailsPinned = false
+
+    fakeService.status = {
+      ready: true,
+      sources: {
+        manual: { available: true, detail: "ready" },
+        blueferry: { available: true, running: true, connected: true },
+        webhook: { available: true, enabled: true, running: true }
+      }
+    }
     picker.openWebhookSetup()
     Qt.callLater(harness.runWebhookSetupAssertions)
   }
@@ -434,6 +526,13 @@ ShellRoot {
     harness.expect(picker.webhookSetupOpen === false,
       "Back did not close the webhook manager")
 
+    harness.named("manageWebhookButton").triggered()
+    harness.expect(picker.webhookSetupOpen === true && picker.webhookGuideOpen === false,
+      "managing a configured webhook must open connection controls, not the guide")
+    harness.expect(harness.named("webhookEnabledButton").visible === true,
+      "managing a configured webhook hid its enable/disable control")
+    picker.closeWebhookSetup()
+
     harness.named("emptyStateSetupButton").triggered()
     harness.expect(picker.webhookSetupOpen === true
       && picker.webhookGuideOpen === true,
@@ -522,7 +621,22 @@ ShellRoot {
       })
       return 16
     }
-    function setWebhookEnabled(enabled) { return 14 }
+    property var webhookToggleRequests: []
+    property var sourceRequests: []
+    function setWebhookEnabled(enabled) {
+      webhookToggleRequests = webhookToggleRequests.concat([enabled === true])
+      Qt.callLater(function() {
+        fakeService.requestFinished(14, "webhook_set_enabled", true, "")
+      })
+      return 14
+    }
+    function setSourceEnabled(sourceId, enabled) {
+      sourceRequests = sourceRequests.concat([[String(sourceId), enabled === true]])
+      Qt.callLater(function() {
+        fakeService.requestFinished(17, "source_set_enabled", true, "")
+      })
+      return 17
+    }
     function rotateWebhookToken() { return 15 }
 
     signal requestFinished(int requestId, string method, bool ok, string message)

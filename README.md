@@ -198,6 +198,30 @@ alphanumeric candidates against phrases such as “verification code” and
 dates, prices, and URLs. It does not send message content to an LLM or remote
 classifier.
 
+## Choosing sources
+
+Every transport except manual entry has an on/off switch. Open the transport
+summary in the picker's title bar and use the switch on each row, or from a
+terminal:
+
+```bash
+oma2fa sources                       # list
+oma2fa sources --disable blueferry   # persist a change
+oma2fa sources --enable tether
+```
+
+Choices persist in `~/.config/oma2fa/sources.json` (mode 0600; only the values
+you set are written), and a running bridge applies an edit on its next
+maintenance tick (15 s) without a restart. `oma2fa bridge --disable-source
+NAME` and `--enable-source NAME` pin a source for one run and win over the
+file; `--no-blueferry` remains as an alias for `--disable-source blueferry`.
+The phone webhook's switch controls its systemd user unit, exactly like the
+**Enable webhook** button in its manager, so it answers "Set up the phone
+webhook first" until the webhook exists.
+
+Defaults: BlueFerry and Blip on (each only does anything when its bridge is
+installed), Tether off until it has been verified against a live daemon.
+
 ## Transport status
 
 ### BlueFerry for iPhone: available now
@@ -221,6 +245,45 @@ BlueFerry is the practical local iPhone experiment today, but it is still
 experimental. Pair and verify your phone in BlueFerry before troubleshooting
 Oma2FA. Granting MAP access allows the paired computer to read messages, not
 just verification codes, while the connection is active.
+
+### Blip for iMessage: available now
+
+[Blip](https://github.com/nixfred/blip) puts iMessage in the Omarchy bar by
+polling a Mac you own over ssh. Oma2FA does not poll the Mac a second time:
+Blip's collector hands each new inbound message to a `message_hook=` program,
+and Oma2FA ships that program. Add one line to `~/.config/blip/bridge.conf`:
+
+```
+message_hook=/home/you/.config/omarchy/plugins/io.github.jondkinney.oma2fa/bin/oma2fa-blip-hook
+```
+
+(an absolute path — Blip parses the file and expands neither `~` nor
+`$HOME`). From the next poll, every new inbound message — every sender, not
+only Blip's toast allowlist, which is the point — reaches `oma2fa blip-hook`
+with the text on stdin and the sender, timestamp, and chat.db row id in
+`BLIP_HOOK_*` environment variables. The hook runs the same detector as every
+other source, stores only the derived record, dedupes on the row id, raises the
+usual desktop notification when a code is found, and exits quietly otherwise.
+The picker's Blip row reads **Ready** once the hook line is present, **Hook
+not configured** while it is missing, and **Not installed** without Blip's
+`bridge.conf`. Turning the Blip source off makes the hook a no-op without
+touching Blip's configuration.
+
+The picker learns about a hooked code on the bridge's next maintenance tick
+(within 15 s); the notification is immediate. Blip reports the Mac's local
+time, which the TTL treats as this computer's local time.
+
+### Tether: experimental
+
+[Tether](https://github.com/zackb/tether) bridges an iPhone to Linux over
+Bluetooth MAP and mirrors messages to a local daemon. Oma2FA's adapter
+subscribes to `tetherd`'s event feed on `$XDG_RUNTIME_DIR/tether/tetherd.sock`
+(`{"command":"subscribe"}`), reduces `bt_message` and `bt_messages` events as
+they arrive, and re-reads threads active inside the code TTL on connect so a
+code that landed while Oma2FA was down is still collected. The adapter was
+written against tether's source rather than exercised against a running
+daemon, so it ships **off**; enable it with `oma2fa sources --enable tether`
+once tether is paired and report what its row says.
 
 ### iPhone
 
@@ -465,6 +528,7 @@ available codes; the bar never displays a code or message content. Search is
 active when the picker opens, while the newest matching code remains the
 default Enter action. When a new code is accepted, Oma2FA also shows a generic
 desktop notification; it contains no code, sender, service, or message text.
+Click the notification to open the Oma2FA picker.
 
 - Type to filter by service, source, or code.
 - Press Down to enter the results at the newest code, or Up to enter at the
