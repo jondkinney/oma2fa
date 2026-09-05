@@ -890,6 +890,7 @@ Item {
     id: setupButton
 
     required property string label
+    property bool backArrow: false
     property bool emphasized: false
     property string fontFamily: root.uiFontFamily
     property int fontSize: Style.font.bodySmall
@@ -912,14 +913,43 @@ Item {
     Accessible.focused: setupButton.activeFocus
     Accessible.onPressAction: if (setupButton.enabled) setupButton.triggered()
 
-    Text {
+    Row {
       anchors.centerIn: parent
-      text: setupButton.label
-      textFormat: Text.PlainText
-      color: setupButton.emphasized ? root.selectedText : root.foreground
-      font.family: setupButton.fontFamily
-      font.pixelSize: setupButton.fontSize
-      font.weight: Font.DemiBold
+      spacing: Style.spacing.sm
+
+      Canvas {
+        visible: setupButton.backArrow
+        width: Style.space(20)
+        height: width
+        anchors.verticalCenter: parent.verticalCenter
+        property color arrowColor: setupButton.emphasized ? root.selectedText : root.foreground
+        onArrowColorChanged: requestPaint()
+        onPaint: {
+          var ctx = getContext("2d")
+          ctx.clearRect(0, 0, width, height)
+          ctx.strokeStyle = arrowColor
+          ctx.lineWidth = Style.space(2)
+          ctx.lineCap = "round"
+          ctx.lineJoin = "round"
+          ctx.beginPath()
+          ctx.moveTo(width * 0.8, height * 0.5)
+          ctx.lineTo(width * 0.2, height * 0.5)
+          ctx.moveTo(width * 0.48, height * 0.22)
+          ctx.lineTo(width * 0.2, height * 0.5)
+          ctx.lineTo(width * 0.48, height * 0.78)
+          ctx.stroke()
+        }
+      }
+
+      Text {
+        anchors.verticalCenter: parent.verticalCenter
+        text: setupButton.label
+        textFormat: Text.PlainText
+        color: setupButton.emphasized ? root.selectedText : root.foreground
+        font.family: setupButton.fontFamily
+        font.pixelSize: setupButton.fontSize
+        font.weight: Font.DemiBold
+      }
     }
 
     MouseArea {
@@ -1882,9 +1912,9 @@ Item {
               anchors.verticalCenter: parent.verticalCenter
               width: root.webhookGuideOpen ? Style.space(132) : Style.space(76)
               implicitHeight: root.titleHeight
-              fontFamily: root.webhookGuideOpen
-                ? root.guideFontFamily : root.fontFamily
-              label: root.webhookGuideOpen ? "← Connection" : "← Back"
+              fontFamily: root.uiFontFamily
+              backArrow: true
+              label: root.webhookGuideOpen ? "Connection" : "Back"
               onTriggered: {
                 if (root.webhookGuideOpen) root.showWebhookConnection()
                 else root.closeWebhookSetup()
