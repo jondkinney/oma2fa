@@ -38,6 +38,7 @@ ShellRoot {
   function fail(message) {
     console.error("OMA2FA_PICKER_SHORTCUTS_FAIL: " + String(message))
     Qt.exit(1)
+    throw new Error(String(message))
   }
 
   function expect(condition, message) {
@@ -202,7 +203,15 @@ ShellRoot {
   }
 
   function runAssertions() {
+    harness.picker.openingPending = true
+    harness.picker.rebuildDisplay(false)
+    Qt.callLater(harness.runLayoutAssertions)
+  }
+
+  function runLayoutAssertions() {
     harness.footer = harness.named("shortcutFooter")
+    harness.named("primaryHints").forceLayout()
+    harness.named("secondaryHints").forceLayout()
 
     var pairs = []
     for (var index = 0; index < harness.shortcutContract.length; index++)

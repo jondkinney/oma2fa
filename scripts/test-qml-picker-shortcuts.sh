@@ -33,6 +33,7 @@ install -m 0644 -- "$repo_root/tests/qml/picker_shortcuts_harness.qml" \
 install -m 0644 -- "$repo_root/Picker.qml" "$runtime_dir/Picker.qml"
 ln -s -- "$shell_root/Commons" "$runtime_dir/Commons"
 ln -s -- "$shell_root/Ui" "$runtime_dir/Ui"
+ln -s -- "$repo_root/assets" "$runtime_dir/assets"
 
 output_file="$runtime_dir/output.log"
 if ! timeout 10s quickshell --no-color -p "$runtime_dir/shell.qml" \

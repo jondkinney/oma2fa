@@ -10,6 +10,7 @@ ShellRoot {
   function fail(message) {
     console.error("OMA2FA_PICKER_STATUS_FAIL: " + String(message))
     Qt.exit(1)
+    throw new Error(String(message))
   }
 
   function expectStatus(expected) {
@@ -503,6 +504,11 @@ ShellRoot {
     harness.expect(JSON.stringify(fakeService.webhookSetup).indexOf("PRIVATE_TOKEN") === -1,
       "authorization value copy exposed a bearer token to QML")
 
+    Qt.callLater(harness.runConnectionReturnAssertions)
+  }
+
+  function runConnectionReturnAssertions() {
+    var guideCard = harness.named("pickerCard")
     harness.named("webhookBackButton").triggered()
     harness.expect(picker.webhookSetupOpen === true,
       "Connection back action unexpectedly closed setup")
@@ -653,13 +659,19 @@ ShellRoot {
     }
     picker = component.createObject(host, {
       service: fakeService,
-      cardWidth: 620,
-      cardHeight: 560
+      cardWidth: 620
     })
     if (!picker) {
       harness.fail("picker creation returned null")
       return
     }
-    Qt.callLater(harness.runAssertions)
+    picker.finishOpen()
+    layoutTimer.start()
+  }
+
+  Timer {
+    id: layoutTimer
+    interval: 100
+    onTriggered: harness.runAssertions()
   }
 }
